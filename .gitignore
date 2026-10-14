@@ -1,78 +1,72 @@
 # ============================================
 # .gitignore para RPG Maker MZ
-# Projeto: HUWAG
+# Projeto: Huwag
 # ============================================
 
-# === Save Files ===
+# === Saves de Jogo (RPG Maker MZ) ===
+# Saves locais nunca devem ser versionados para não sobrepor o progresso de outros
 save/
-Save*.rpgsave
+Save/
+*.rmmzsave
+Save*.rmmzsave
+config.rmmzsave
+global.rmmzsave
+www/save/
 *.rpgsave
 
-# === Cache e Temporários ===
-www/save/
-$RECYCLE.BIN/
+# === Builds e Exportações (Deployment do RMMZ) ===
+# Builds compiladas geradas via "Arquivo -> Deployment"
+output/
+deployment/
+build/
+dist/
+www/
+Game.exe
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# === Backups e Temporários do RPG Maker ===
+Backup/
+backup/
+*.backup
 *.tmp
 *.log
 *.cache
-
-# === Node Modules (se usar plugins npm) ===
-node_modules/
-package-lock.json
-
-# === Arquivos de Sistema ===
-.DS_Store
-Thumbs.db
-desktop.ini
-*.swp
-*.swo
 *~
 
-# === Assets Grandes (Opcional - veja observações abaixo) ===
-# Descomente se quiser versionar apenas o código/dados:
-# audio/
-# img/
-# movies/
+# === Node & Dependências (se usar ferramentas externas) ===
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# === Builds e Deployment ===
-# Não versione as builds compiladas - apenas o projeto fonte
-# Descomente se você gerar builds:
-# www/
-# *.zip
-# *.exe
-# *.app
-# *.dmg
+# === Arquivos de Sistema Operacional ===
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
 
-# === Kiro/IDE (manter versionado para colaboração) ===
-# .kiro/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
 
-# === Backup do RPG Maker ===
-*.backup
-Backup/
+# Linux
+*~
+.directory
 
-# === Plugins Externos (se instalados manualmente) ===
-# Se usar gerenciador de pacotes, adicione:
-# js/plugins/VisuMZ_*.js
-# js/plugins/YEP_*.js
+# === IDEs e Editores ===
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
 
-# ============================================
-# OBSERVAÇÕES IMPORTANTES:
-# ============================================
-# 
-# 1. ASSETS (audio/, img/, movies/):
-#    - Se estão comentados (#), os assets SERÃO versionados
-#    - Descomente se quiser usar Git LFS ou hospedagem externa
-#    - Atenção: áudios .ogg podem ser grandes (200MB+)
-#
-# 2. BUILDS (www/):
-#    - Não versione builds compiladas
-#    - Use GitHub Releases para distribuir .zip finais
-#
-# 3. COLABORAÇÃO:
-#    - data/ e js/ DEVEM ser versionados (código do jogo)
-#    - .kiro/ pode ser versionado (configurações do projeto)
-#
-# 4. GIT LFS (Large File Storage):
-#    - Considere usar para assets grandes
-#    - Comandos: git lfs track "*.ogg"
-#              git lfs track "*.png"
-# ============================================
