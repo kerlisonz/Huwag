@@ -1,186 +1,97 @@
-# 🔥 HUWAG
+# Huwag
 
-> Um RPG 2D sobre saúde mental, rotina e a linha tênue entre realidade e percepção
+RPG 2D de terror psicológico e exploração desenvolvido no RPG Maker MZ.
 
-[![RPG Maker MZ](https://img.shields.io/badge/RPG%20Maker-MZ-red?style=flat-square)](https://www.rpgmakerweb.com/)
-[![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow?style=flat-square)]()
-[![Versão](https://img.shields.io/badge/Versão-0.0.2-blue?style=flat-square)]()
+O jogo acompanha a rotina de **Huwag Matitiis**, um jovem bombeiro de 23 anos em um cenário urbano inspirado nas Filipinas. A narrativa é dividida em três atos e trabalha o contraste de percepção: sob o efeito de remédios (Atos 1 e 2), Huwag enxerga a cidade e seus colegas de forma lúdica e colorida. No Ato 3, o efeito cessa, revelando o ambiente cru, desgastado e monocromático, sem promessas de soluções fáceis ou finais mágicos.
 
----
-
-## 📖 Sobre o Projeto
-
-**HUWAG** é um RPG 2D top-down desenvolvido em RPG Maker MZ que explora temas de **saúde mental**, **trauma** e **percepção da realidade** através da história de um jovem bombeiro filipino.
-
-### 🎮 Características
-
-- **Terror Psicológico** com elementos de fantasia
-- **Mudança visual narrativa**: Do colorido ao monocromático
-- **Dilemas morais** sem respostas certas
-- **Ambientação filipina** com cultura local
-- **Aproximadamente 30 minutos** de gameplay
-
-### 🌟 Diferenciais
-
-- Transição gráfica atrelada à narrativa (medicação ↔ percepção)
-- Trilha sonora medieval instrumental + SFX artesanais
-- Sem indicadores simplistas de moralidade
-- Abordagem empática sobre saúde mental
+O projeto foi planejado para uma experiência curta e direta, com cerca de 30 minutos de gameplay.
 
 ---
 
-## 🎯 História
+## O Jogo
 
-Você joga como **Huwag Matitiis**, um bombeiro de 23 anos que enfrenta transtornos mentais e um passado esquecido. Sob efeito de medicação, o mundo aparece colorido e lúdico. Mas quando o remédio perde o efeito...
+- **Gênero:** RPG top-down / narrativa de terror psicológico
+- **Engine:** RPG Maker MZ
+- **Plataformas:** Windows e Linux
+- **Duração prevista:** ~30 minutos
+- **Influências narrativas e estéticas:** *As Aventuras de Pi* (distorção da realidade pelo trauma) e *Yume Nikki* (estranheza e exploração em mapas 2D).
 
-### Estrutura em 3 Atos:
-- **Ato 1**: Introdução ao mundo colorido e mecânicas
-- **Ato 2**: Dilemas morais e decisões de resgate
-- **Ato 3**: Revelação da realidade monocromática
-
----
-
-## 🛠️ Desenvolvimento
-
-### Tecnologias
-- **Engine**: RPG Maker MZ
-- **Plataformas**: Windows, Linux
-- **Linguagem**: JavaScript (plugins)
-
-### Influências
-- 🎬 **As Aventuras de Pi** (narrativa e percepção)
-- 🎮 **Yume Nikki** (exploração surreal 2D)
-
-### Cronograma
-| Semana | Foco |
-|--------|------|
-| 1 | Pré-Produção & Database |
-| 2 | Mapeamento Atos 1 e 2 |
-| 3 | Mapeamento Ato 3 & Filtros |
-| 4 | Mecânicas de Resgate |
-| 5 | Sonoplastia & Ramificações |
-| 6 | Polimento & Exportação |
+### Elementos Centrais
+- **Quebra de percepção visual:** A passagem do colorido para o monocromático reflete o estado mental do protagonista e o fim do efeito dos medicamentos.
+- **Dilemas de resgate:** Como bombeiro, o jogador precisa tomar decisões em situações de emergência que afetam a rotina dos moradores e companheiros de equipe.
+- **Ambientação cultural:** Cenários e interações com elementos cotidianos filipinos, incluindo veículos típicos (*jeepneys*), comércio de bairro (*sari-sari stores*) e diálogos locais.
+- **Trilha e efeitos sonoros:** Músicas instrumentais e sonoplastia com objetos do dia a dia para compor o clima dos cenários.
 
 ---
 
-## 🚀 Como Executar
+## Estrutura dos Mapas Implementados
+
+Os mapas base do projeto foram estruturados nos arquivos de dados (`data/`):
+
+- **Map001 — Quarto de Huwag:** Quitinete simples do protagonista. Ponto de partida da narrativa, contendo objetos interativos como a mesa de remédios, o uniforme de bombeiro e a janela para a rua.
+- **Map002 — Cidade:** Área urbana externa com trânsito de jeepney, pedestres, moradores e a loja sari-sari, servindo de transição para o serviço.
+- **Map003 — Quartel dos Bombeiros:** Local de trabalho de Huwag, com interações com o Capitão Reyes, a enfermeira Maria e os colegas de equipe (Ato e Santos).
+
+---
+
+## Como Abrir e Executar
 
 ### Pré-requisitos
-- [RPG Maker MZ](https://www.rpgmakerweb.com/) instalado
-- Windows 10+ ou Linux compatível
+- **RPG Maker MZ** instalado no computador.
+- Sistema operacional Windows (10/11) ou ambiente Linux compatível.
 
 ### Passos
 1. Clone o repositório:
    ```bash
-   git clone https://github.com/seu-usuario/HUWAG.git
+   git clone https://github.com/kerlisonz/Huwag.git
    ```
+2. Abra o RPG Maker MZ.
+3. No menu principal, vá em **Arquivo → Abrir Projeto** (ou `File → Open Project`).
+4. Navegue até a pasta clonada e selecione o arquivo `game.rmmzproject`.
+5. Para testar o jogo dentro do editor, pressione **F5** ou acesse **Jogo → Teste de Jogo**.
 
-2. Abra o projeto no RPG Maker MZ:
-   - Arquivo → Abrir Projeto
-   - Selecione a pasta `HUWAG TESTE`
-
-3. Teste o jogo:
-   - Pressione **F5** no RPG Maker MZ
-   - Ou: Menu → Jogo → Teste de Jogo
+> **Nota para colaboradores:** Mantenha os arquivos das pastas `data/`, `audio/` e `img/` sincronizados antes de abrir o projeto no editor para evitar conflitos de mapeamento no RPG Maker MZ.
 
 ---
 
-## 📂 Estrutura do Projeto
+## Organização do Repositório
 
-```
-HUWAG TESTE/
-├── audio/          # BGM e SFX
-│   ├── bgm/        # Músicas de fundo
-│   └── bgs/        # Efeitos sonoros ambiente
-├── data/           # Dados do jogo (mapas, eventos, database)
-│   ├── Map001.json # Quarto do Huwag
-│   ├── Map002.json # Cidade
-│   └── Map003.json # Quartel dos Bombeiros
-├── img/            # Assets gráficos
-│   ├── characters/ # Sprites dos personagens
-│   ├── tilesets/   # Tilesets dos mapas
-│   └── faces/      # Retratos de diálogo
-├── js/             # Scripts e plugins
-├── .kiro/          # Configurações do projeto
-│   └── steering/   # GDD e documentação
-└── README.md       # Este arquivo
+```text
+Huwag/
+├── data/              # Mapas (Map001 a Map003), eventos e banco de dados JSON
+├── js/                # Núcleo da engine e configuração de plugins (plugins.js)
+├── img/               # Tilesets, sprites de personagens, rostos e interface
+├── audio/             # BGMs e efeitos sonoros
+├── .kiro/steering/    # Game Design Document (gdd.md) e referências
+├── game.rmmzproject   # Arquivo descritor de projeto do RPG Maker MZ
+├── package.json       # Configuração da janela do executável (NW.js / Chromium)
+└── README.md          # Documentação principal
 ```
 
 ---
 
-## 👥 Colaboração
+## Cronograma e Andamento
 
-Este é um projeto **privado** em desenvolvimento. Se você foi adicionado como colaborador:
+O desenvolvimento segue um cronograma de 6 semanas:
 
-1. **Não compartilhe** o código ou assets publicamente
-2. **Comunique** mudanças importantes via Issues/PRs
-3. **Teste** suas alterações antes de commitar
-4. **Siga** as convenções do projeto
-
-### Workflow Sugerido
-```bash
-# Sempre atualize antes de trabalhar
-git pull origin main
-
-# Crie uma branch para sua feature
-git checkout -b feature/nome-da-feature
-
-# Faça commits descritivos
-git commit -m "feat: adiciona diálogo do NPC X"
-
-# Envie para revisão
-git push origin feature/nome-da-feature
-```
+- [x] Semana 1: Pré-produção, banco de dados base e documentação (GDD)
+- [x] Semana 2: Mapeamento dos Atos 1 e 2 (Quarto, Cidade e Quartel com NPCs e diálogos)
+- [ ] Semana 3: Mapeamento do Ato 3 e configuração de filtros/tonalidade monocromática
+- [ ] Semana 4: Programação dos eventos e dilemas de resgate
+- [ ] Semana 5: Sonoplastia artesanal e integração da trilha sonora
+- [ ] Semana 6: Testes gerais, ajustes de iluminação e compilação final
 
 ---
 
-## 📋 Roadmap
+## Equipe
 
-- [x] Criação do quarto do protagonista
-- [x] Mapa da cidade filipina
-- [x] Quartel dos bombeiros
-- [x] NPCs iniciais com diálogos
-- [ ] Sistema de encontros com criaturas
-- [ ] Mecânicas de resgate
-- [ ] Transição visual Ato 2 → Ato 3
-- [ ] Trilha sonora completa
-- [ ] SFX artesanais
-- [ ] Plugins de tonalidade
+- **Kerlison Kennedy da Silva Oliveira**
+- **Maria Eduarda Cavalcante Melo**
+- **Wilton Carlos Justino da Costa Filho**
 
 ---
 
-## 📄 Documentação
+## Licença
 
-- **GDD Completo**: `.kiro/steering/gdd.md`
-- **Versão**: 0.0.2
-- **Prazo**: 6 semanas
-- **Tempo de Jogo**: ~30 minutos
+Projeto desenvolvido para fins acadêmicos e não comerciais. Os assets padrão e bibliotecas da engine pertencem à Gotcha Gotcha Games / RPG Maker MZ sob seus respectivos termos de uso.
 
----
-
-## 📜 Licença
-
-Este projeto é **propriedade privada** e está em desenvolvimento. Todos os direitos reservados aos criadores.
-
-Assets de terceiros (tilesets, BGM padrão do RPG Maker) mantêm suas licenças originais.
-
----
-
-## 🤝 Créditos
-
-- **Desenvolvimento**: [Seu Nome]
-- **Co-desenvolvedor**: [Nome do Colega]
-- **Engine**: RPG Maker MZ
-- **Assets**: RPG Maker MZ Default + Custom
-
----
-
-## 📞 Contato
-
-Para dúvidas ou sugestões sobre o projeto:
-- **Issues**: Use a aba Issues do GitHub
-- **Email**: [seu-email@exemplo.com] (opcional)
-
----
-
-**Status do Projeto**: 🟡 Em Desenvolvimento Ativo (Semana 2/6)
