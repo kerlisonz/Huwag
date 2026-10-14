@@ -7,25 +7,37 @@
 # Saves locais nunca devem ser versionados para não sobrepor o progresso de outros
 save/
 Save/
+game/save/
+game/Save/
 *.rmmzsave
 Save*.rmmzsave
 config.rmmzsave
 global.rmmzsave
 www/save/
+game/www/save/
 *.rpgsave
 
 # === Builds e Exportações (Deployment do RMMZ) ===
 # Builds compiladas geradas via "Arquivo -> Deployment"
 output/
+game/output/
 deployment/
+game/deployment/
 build/
+game/build/
 dist/
+game/dist/
 www/
+game/www/
 Game.exe
 *.zip
 *.rar
 *.7z
 *.tar.gz
+
+# === Ferramentas e IA Locais ===
+.agents/
+scratch/
 
 # === Backups e Temporários do RPG Maker ===
 Backup/

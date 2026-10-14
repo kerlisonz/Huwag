@@ -95,3 +95,4 @@ O desenvolvimento segue um cronograma de 6 semanas:
 
 Projeto desenvolvido para fins acadêmicos e não comerciais. Os assets padrão e bibliotecas da engine pertencem à Gotcha Gotcha Games / RPG Maker MZ sob seus respectivos termos de uso.
 
+
