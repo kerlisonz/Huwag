@@ -1,0 +1,78 @@
+# ============================================
+# .gitignore para RPG Maker MZ
+# Projeto: HUWAG
+# ============================================
+
+# === Save Files ===
+save/
+Save*.rpgsave
+*.rpgsave
+
+# === Cache e Temporários ===
+www/save/
+$RECYCLE.BIN/
+*.tmp
+*.log
+*.cache
+
+# === Node Modules (se usar plugins npm) ===
+node_modules/
+package-lock.json
+
+# === Arquivos de Sistema ===
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# === Assets Grandes (Opcional - veja observações abaixo) ===
+# Descomente se quiser versionar apenas o código/dados:
+# audio/
+# img/
+# movies/
+
+# === Builds e Deployment ===
+# Não versione as builds compiladas - apenas o projeto fonte
+# Descomente se você gerar builds:
+# www/
+# *.zip
+# *.exe
+# *.app
+# *.dmg
+
+# === Kiro/IDE (manter versionado para colaboração) ===
+# .kiro/
+
+# === Backup do RPG Maker ===
+*.backup
+Backup/
+
+# === Plugins Externos (se instalados manualmente) ===
+# Se usar gerenciador de pacotes, adicione:
+# js/plugins/VisuMZ_*.js
+# js/plugins/YEP_*.js
+
+# ============================================
+# OBSERVAÇÕES IMPORTANTES:
+# ============================================
+# 
+# 1. ASSETS (audio/, img/, movies/):
+#    - Se estão comentados (#), os assets SERÃO versionados
+#    - Descomente se quiser usar Git LFS ou hospedagem externa
+#    - Atenção: áudios .ogg podem ser grandes (200MB+)
+#
+# 2. BUILDS (www/):
+#    - Não versione builds compiladas
+#    - Use GitHub Releases para distribuir .zip finais
+#
+# 3. COLABORAÇÃO:
+#    - data/ e js/ DEVEM ser versionados (código do jogo)
+#    - .kiro/ pode ser versionado (configurações do projeto)
+#
+# 4. GIT LFS (Large File Storage):
+#    - Considere usar para assets grandes
+#    - Comandos: git lfs track "*.ogg"
+#              git lfs track "*.png"
+# ============================================
