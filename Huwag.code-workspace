@@ -1,0 +1,20 @@
+{
+  "folders": [
+    {
+      "name": "RPG Maker MZ (Game)",
+      "path": "game"
+    },
+    {
+      "name": "Huwag (Docs & Config)",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "[javascript]": {
+      "editor.quickSuggestions": {
+        "comments": "inline"
+      }
+    }
+  }
+}
+
