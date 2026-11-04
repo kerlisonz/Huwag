@@ -1,5 +1,5 @@
 //=============================================================================
-// rmmz_windows.js v1.1.1
+// rmmz_windows.js v1.9.0
 //=============================================================================
 
 //-----------------------------------------------------------------------------
@@ -74,7 +74,7 @@ Window_Base.prototype.updatePadding = function() {
 };
 
 Window_Base.prototype.updateBackOpacity = function() {
-    this.backOpacity = 192;
+    this.backOpacity = $gameSystem.windowOpacity();
 };
 
 Window_Base.prototype.fittingHeight = function(numLines) {
@@ -291,12 +291,11 @@ Window_Base.prototype.convertEscapeCharacters = function(text) {
     /* eslint no-control-regex: 0 */
     text = text.replace(/\\/g, "\x1b");
     text = text.replace(/\x1b\x1b/g, "\\");
-    text = text.replace(/\x1bV\[(\d+)\]/gi, (_, p1) =>
-        $gameVariables.value(parseInt(p1))
-    );
-    text = text.replace(/\x1bV\[(\d+)\]/gi, (_, p1) =>
-        $gameVariables.value(parseInt(p1))
-    );
+    while (text.match(/\x1bV\[(\d+)\]/gi)) {
+        text = text.replace(/\x1bV\[(\d+)\]/gi, (_, p1) =>
+            $gameVariables.value(parseInt(p1))
+        );
+    }
     text = text.replace(/\x1bN\[(\d+)\]/gi, (_, p1) =>
         this.actorName(parseInt(p1))
     );
@@ -396,10 +395,14 @@ Window_Base.prototype.processColorChange = function(colorIndex) {
 };
 
 Window_Base.prototype.processDrawIcon = function(iconIndex, textState) {
+    const deltaX = ImageManager.standardIconWidth - ImageManager.iconWidth;
+    const deltaY = ImageManager.standardIconHeight - ImageManager.iconHeight;
     if (textState.drawing) {
-        this.drawIcon(iconIndex, textState.x + 2, textState.y + 2);
+        const x = textState.x + deltaX / 2 + 2;
+        const y = textState.y + deltaY / 2 + 2;
+        this.drawIcon(iconIndex, x, y);
     }
-    textState.x += ImageManager.iconWidth + 4;
+    textState.x += ImageManager.standardIconWidth + 4;
 };
 
 Window_Base.prototype.makeFontBigger = function() {
@@ -459,8 +462,8 @@ Window_Base.prototype.drawIcon = function(iconIndex, x, y) {
 Window_Base.prototype.drawFace = function(
     faceName, faceIndex, x, y, width, height
 ) {
-    width = width || ImageManager.faceWidth;
-    height = height || ImageManager.faceHeight;
+    width = width || ImageManager.standardFaceWidth;
+    height = height || ImageManager.standardFaceHeight;
     const bitmap = ImageManager.loadFace(faceName);
     const pw = ImageManager.faceWidth;
     const ph = ImageManager.faceHeight;
@@ -490,10 +493,11 @@ Window_Base.prototype.drawCharacter = function(
 Window_Base.prototype.drawItemName = function(item, x, y, width) {
     if (item) {
         const iconY = y + (this.lineHeight() - ImageManager.iconHeight) / 2;
-        const textMargin = ImageManager.iconWidth + 4;
+        const delta = ImageManager.standardIconWidth - ImageManager.iconWidth;
+        const textMargin = ImageManager.standardIconWidth + 4;
         const itemWidth = Math.max(0, width - textMargin);
         this.resetTextColor();
-        this.drawIcon(item.iconIndex, x, iconY);
+        this.drawIcon(item.iconIndex, x + delta / 2, iconY);
         this.drawText(item.name, x + textMargin, y, itemWidth);
     }
 };
@@ -1792,9 +1796,10 @@ Window_StatusBase.prototype.drawActorLevel = function(actor, x, y) {
 
 Window_StatusBase.prototype.drawActorIcons = function(actor, x, y, width) {
     width = width || 144;
-    const iconWidth = ImageManager.iconWidth;
+    const delta = ImageManager.standardIconWidth - ImageManager.iconWidth;
+    const iconWidth = ImageManager.standardIconWidth;
     const icons = actor.allIcons().slice(0, Math.floor(width / iconWidth));
-    let iconX = x;
+    let iconX = x + delta / 2;
     for (const icon of icons) {
         this.drawIcon(icon, iconX, y + 2);
         iconX += iconWidth;
@@ -1987,7 +1992,7 @@ Window_MenuStatus.prototype.drawPendingItemBackground = function(index) {
 Window_MenuStatus.prototype.drawItemImage = function(index) {
     const actor = this.actor(index);
     const rect = this.itemRect(index);
-    const width = ImageManager.faceWidth;
+    const width = ImageManager.standardFaceWidth;
     const height = rect.height - 2;
     this.changePaintOpacity(actor.isBattleMember());
     this.drawActorFace(actor, rect.x + 1, rect.y + 1, width, height);
@@ -2585,7 +2590,7 @@ Window_EquipStatus.prototype.paramX = function() {
 };
 
 Window_EquipStatus.prototype.paramY = function(index) {
-    const faceHeight = ImageManager.faceHeight;
+    const faceHeight = ImageManager.standardFaceHeight;
     return faceHeight + Math.floor(this.lineHeight() * (index + 1.5));
 };
 
@@ -4316,6 +4321,7 @@ Window_ChoiceList.prototype.start = function() {
     this.placeCancelButton();
     this.createContents();
     this.refresh();
+    this.scrollTo(0, 0);
     this.selectDefault();
     this.open();
     this.activate();
@@ -4675,6 +4681,7 @@ Window_EventItem.prototype.initialize = function(rect) {
     this.deactivate();
     this.setHandler("ok", this.onOk.bind(this));
     this.setHandler("cancel", this.onCancel.bind(this));
+    this._canRepeat = false;
 };
 
 Window_EventItem.prototype.setMessageWindow = function(messageWindow) {
@@ -4879,7 +4886,7 @@ Window_Message.prototype.startMessage = function() {
 
 Window_Message.prototype.newLineX = function(textState) {
     const faceExists = $gameMessage.faceName() !== "";
-    const faceWidth = ImageManager.faceWidth;
+    const faceWidth = ImageManager.standardFaceWidth;
     const spacing = 20;
     const margin = faceExists ? faceWidth + spacing : 4;
     return textState.rtl ? this.innerWidth - margin : margin;
@@ -4911,6 +4918,12 @@ Window_Message.prototype.updateWait = function() {
         return true;
     } else {
         return false;
+    }
+};
+
+Window_Message.prototype.cancelWait = function() {
+    if ($gameSystem.isMessageSkipEnabled()) {
+        this._waitCount = 0;
     }
 };
 
@@ -4967,7 +4980,7 @@ Window_Message.prototype.updateMessage = function() {
             }
         }
         this.flushTextState(textState);
-        if (this.isEndOfText(textState) && !this.pause) {
+        if (this.isEndOfText(textState) && !this.isWaiting()) {
             this.onEndOfText();
         }
         return true;
@@ -4981,7 +4994,7 @@ Window_Message.prototype.shouldBreakHere = function(textState) {
         if (!this._showFast && !this._lineShowFast) {
             return true;
         }
-        if (this.pause || this._waitCount > 0) {
+        if (this.isWaiting()) {
             return true;
         }
     }
@@ -5080,7 +5093,7 @@ Window_Message.prototype.drawMessageFace = function() {
     const faceName = $gameMessage.faceName();
     const faceIndex = $gameMessage.faceIndex();
     const rtl = $gameMessage.isRTL();
-    const width = ImageManager.faceWidth;
+    const width = ImageManager.standardFaceWidth;
     const height = this.innerHeight;
     const x = rtl ? this.innerWidth - width - 4 : 4;
     this.drawFace(faceName, faceIndex, x, 0, width, height);
@@ -5162,6 +5175,10 @@ Window_Message.prototype.startPause = function() {
     this.pause = true;
 };
 
+Window_Message.prototype.isWaiting = function() {
+    return this.pause || this._waitCount > 0;
+};
+
 //-----------------------------------------------------------------------------
 // Window_ScrollText
 //
@@ -5181,7 +5198,11 @@ Window_ScrollText.prototype.initialize = function(rect) {
     this.hide();
     this._reservedRect = rect;
     this._text = "";
+    this._maxBitmapHeight = 2048;
     this._allTextHeight = 0;
+    this._blockHeight = 0;
+    this._blockIndex = 0;
+    this._scrollY = 0;
 };
 
 Window_ScrollText.prototype.update = function() {
@@ -5200,6 +5221,11 @@ Window_ScrollText.prototype.startMessage = function() {
     this._text = $gameMessage.allText();
     if (this._text) {
         this.updatePlacement();
+        this._allTextHeight = this.textSizeEx(this._text).height;
+        this._blockHeight = this._maxBitmapHeight - this.height;
+        this._blockIndex = 0;
+        this.origin.y = this._scrollY = -this.height;
+        this.createContents();
         this.refresh();
         this.show();
     } else {
@@ -5208,11 +5234,10 @@ Window_ScrollText.prototype.startMessage = function() {
 };
 
 Window_ScrollText.prototype.refresh = function() {
-    this._allTextHeight = this.textSizeEx(this._text).height;
-    this.createContents();
-    this.origin.y = -this.height;
     const rect = this.baseTextRect();
-    this.drawTextEx(this._text, rect.x, rect.y, rect.width);
+    const y = rect.y - this._scrollY + (this._scrollY % this._blockHeight);
+    this.contents.clear();
+    this.drawTextEx(this._text, rect.x, y, rect.width);
 };
 
 Window_ScrollText.prototype.updatePlacement = function() {
@@ -5221,13 +5246,24 @@ Window_ScrollText.prototype.updatePlacement = function() {
 };
 
 Window_ScrollText.prototype.contentsHeight = function() {
-    return Math.max(this._allTextHeight, 1);
+    if (this._allTextHeight > 0) {
+        return Math.min(this._allTextHeight, this._maxBitmapHeight);
+    } else {
+        return 0;
+    }
 };
 
 Window_ScrollText.prototype.updateMessage = function() {
-    this.origin.y += this.scrollSpeed();
-    if (this.origin.y >= this.contents.height) {
+    this._scrollY += this.scrollSpeed();
+    if (this._scrollY >= this._allTextHeight) {
         this.terminateMessage();
+    } else {
+        const blockIndex = Math.floor(this._scrollY / this._blockHeight);
+        if (blockIndex > this._blockIndex) {
+            this._blockIndex = blockIndex;
+            this.refresh();
+        }
+        this.origin.y = this._scrollY % this._blockHeight;
     }
 };
 
@@ -6143,11 +6179,11 @@ Window_BattleStatus.prototype.nameY = function(rect) {
 };
 
 Window_BattleStatus.prototype.stateIconX = function(rect) {
-    return rect.x + rect.width - ImageManager.iconWidth / 2 + 4;
+    return rect.x + rect.width - ImageManager.standardIconWidth / 2 + 4;
 };
 
 Window_BattleStatus.prototype.stateIconY = function(rect) {
-    return rect.y + ImageManager.iconHeight / 2 + 4;
+    return rect.y + ImageManager.standardIconHeight / 2 + 4;
 };
 
 Window_BattleStatus.prototype.basicGaugesX = function(rect) {

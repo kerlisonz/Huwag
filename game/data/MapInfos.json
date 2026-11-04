@@ -1,6 +1,8 @@
 [
 null,
 {"id":1,"expanded":false,"name":"Quarto de Huwag","order":1,"parentId":0,"scrollX":459,"scrollY":312.5},
-{"id":2,"expanded":false,"name":"Cidade","order":2,"parentId":0,"scrollX":451,"scrollY":343.5},
-{"id":3,"expanded":false,"name":"Quartel dos Bombeiros","order":3,"parentId":0,"scrollX":451,"scrollY":311.5}
+{"id":2,"expanded":false,"name":"Cidade","order":2,"parentId":0,"scrollX":825.3333333333334,"scrollY":470},
+{"id":3,"expanded":false,"name":"Quartel dos Bombeiros","order":3,"parentId":0,"scrollX":451,"scrollY":311.5},
+{"id":4,"expanded":false,"name":"JABS_ActionMap","order":4,"parentId":0,"scrollX":0,"scrollY":0},
+{"id":5,"expanded":false,"name":"JABS_EnemyMap","order":5,"parentId":0,"scrollX":0,"scrollY":0}
 ]

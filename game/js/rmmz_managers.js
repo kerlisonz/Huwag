@@ -1,5 +1,5 @@
 //=============================================================================
-// rmmz_managers.js v1.1.1
+// rmmz_managers.js v1.9.0
 //=============================================================================
 
 //-----------------------------------------------------------------------------
@@ -216,6 +216,10 @@ DataManager.isBattleTest = function() {
 
 DataManager.isEventTest = function() {
     return Utils.isOptionValid("etest");
+};
+
+DataManager.isTitleSkip = function() {
+    return Utils.isOptionValid("tskip");
 };
 
 DataManager.isSkill = function(item) {
@@ -847,14 +851,58 @@ function ImageManager() {
     throw new Error("This is a static class");
 }
 
-ImageManager.iconWidth = 32;
-ImageManager.iconHeight = 32;
-ImageManager.faceWidth = 144;
-ImageManager.faceHeight = 144;
+ImageManager.standardIconWidth = 32;
+ImageManager.standardIconHeight = 32;
+ImageManager.standardFaceWidth = 144;
+ImageManager.standardFaceHeight = 144;
 
 ImageManager._cache = {};
 ImageManager._system = {};
 ImageManager._emptyBitmap = new Bitmap(1, 1);
+
+Object.defineProperty(ImageManager, "iconWidth", {
+    get: function() {
+        return this.getIconSize();
+    },
+    configurable: true
+});
+
+Object.defineProperty(ImageManager, "iconHeight", {
+    get: function() {
+        return this.getIconSize();
+    },
+    configurable: true
+});
+
+Object.defineProperty(ImageManager, "faceWidth", {
+    get: function() {
+        return this.getFaceSize();
+    },
+    configurable: true
+});
+
+Object.defineProperty(ImageManager, "faceHeight", {
+    get: function() {
+        return this.getFaceSize();
+    },
+    configurable: true
+});
+
+ImageManager.getIconSize = function() {
+    if ("iconSize" in $dataSystem) {
+        return $dataSystem.iconSize;
+    } else {
+        return this.defaultIconWidth;
+    }
+};
+
+ImageManager.getFaceSize = function() {
+    if ("faceSize" in $dataSystem) {
+        return $dataSystem.faceSize;
+    } else {
+        return this.defaultFaceWidth;
+    }
+};
 
 ImageManager.loadAnimation = function(filename) {
     return this.loadBitmap("img/animations/", filename);
@@ -958,17 +1006,17 @@ ImageManager.throwLoadError = function(bitmap) {
 };
 
 ImageManager.isObjectCharacter = function(filename) {
-    const sign = filename.match(/^[!$]+/);
+    const sign = Utils.extractFileName(filename).match(/^[!$]+/);
     return sign && sign[0].includes("!");
 };
 
 ImageManager.isBigCharacter = function(filename) {
-    const sign = filename.match(/^[!$]+/);
+    const sign = Utils.extractFileName(filename).match(/^[!$]+/);
     return sign && sign[0].includes("$");
 };
 
 ImageManager.isZeroParallax = function(filename) {
-    return filename.charAt(0) === "!";
+    return Utils.extractFileName(filename).charAt(0) === "!";
 };
 
 //-----------------------------------------------------------------------------
@@ -1961,7 +2009,9 @@ SceneManager.determineRepeatNumber = function(deltaTime) {
 };
 
 SceneManager.terminate = function() {
-    window.close();
+    if (Utils.isNwjs()) {
+        nw.App.quit();
+    }
 };
 
 SceneManager.onError = function(event) {
@@ -2067,7 +2117,7 @@ SceneManager.updateInputData = function() {
 };
 
 SceneManager.updateEffekseer = function() {
-    if (Graphics.effekseer) {
+    if (Graphics.effekseer && this.isGameActive()) {
         Graphics.effekseer.update();
     }
 };
@@ -2676,8 +2726,14 @@ BattleManager.endTurn = function() {
     this._phase = "turnEnd";
     this._preemptive = false;
     this._surprise = false;
-    if (!this.isTpb()) {
+};
+
+BattleManager.updateTurnEnd = function() {
+    if (this.isTpb()) {
+        this.startTurn();
+    } else {
         this.endAllBattlersTurn();
+        this._phase = "start";
     }
 };
 
@@ -2694,14 +2750,6 @@ BattleManager.displayBattlerStatus = function(battler, current) {
         this._logWindow.displayCurrentState(battler);
     }
     this._logWindow.displayRegeneration(battler);
-};
-
-BattleManager.updateTurnEnd = function() {
-    if (this.isTpb()) {
-        this.startTurn();
-    } else {
-        this.startInput();
-    }
 };
 
 BattleManager.getNextSubject = function() {
@@ -2802,8 +2850,8 @@ BattleManager.invokeMagicReflection = function(subject, target) {
 
 BattleManager.applySubstitute = function(target) {
     if (this.checkSubstitute(target)) {
-        const substitute = target.friendsUnit().substituteBattler();
-        if (substitute && target !== substitute) {
+        const substitute = target.friendsUnit().substituteBattler(target);
+        if (substitute) {
             this._logWindow.displaySubstitute(substitute, target);
             return substitute;
         }
@@ -2816,12 +2864,18 @@ BattleManager.checkSubstitute = function(target) {
 };
 
 BattleManager.isActionForced = function() {
-    return !!this._actionForcedBattler;
+    return (
+        !!this._actionForcedBattler &&
+        !$gameParty.isAllDead() &&
+        !$gameTroop.isAllDead()
+    );
 };
 
 BattleManager.forceAction = function(battler) {
-    this._actionForcedBattler = battler;
-    this._actionBattlers.remove(battler);
+    if (battler.numActions() > 0) {
+        this._actionForcedBattler = battler;
+        this._actionBattlers.remove(battler);
+    }
 };
 
 BattleManager.processForcedAction = function() {
@@ -2842,7 +2896,8 @@ BattleManager.abort = function() {
 
 BattleManager.checkBattleEnd = function() {
     if (this._phase) {
-        if (this.checkAbort()) {
+        if ($gameParty.isEscaped()) {
+            this.processPartyEscape();
             return true;
         } else if ($gameParty.isAllDead()) {
             this.processDefeat();
@@ -2856,8 +2911,9 @@ BattleManager.checkBattleEnd = function() {
 };
 
 BattleManager.checkAbort = function() {
-    if ($gameParty.isEmpty() || this.isAborting()) {
+    if (this.isAborting()) {
         this.processAbort();
+        return true;
     }
     return false;
 };
@@ -2901,6 +2957,11 @@ BattleManager.onEscapeFailure = function() {
     }
 };
 
+BattleManager.processPartyEscape = function() {
+    this._escaped = true;
+    this.processAbort();
+};
+
 BattleManager.processAbort = function() {
     $gameParty.removeBattleStates();
     this._logWindow.clear();
@@ -2931,6 +2992,7 @@ BattleManager.endBattle = function(result) {
     } else if (this._escaped) {
         $gameSystem.onBattleEscape();
     }
+    $gameTemp.clearCommonEventReservation();
 };
 
 BattleManager.updateBattleEnd = function() {
@@ -3046,10 +3108,11 @@ PluginManager._commands = {};
 
 PluginManager.setup = function(plugins) {
     for (const plugin of plugins) {
-        if (plugin.status && !this._scripts.includes(plugin.name)) {
-            this.setParameters(plugin.name, plugin.parameters);
+        const pluginName = Utils.extractFileName(plugin.name);
+        if (plugin.status && !this._scripts.includes(pluginName)) {
+            this.setParameters(pluginName, plugin.parameters);
             this.loadScript(plugin.name);
-            this._scripts.push(plugin.name);
+            this._scripts.push(pluginName);
         }
     }
 };

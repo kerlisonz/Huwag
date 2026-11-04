@@ -1,0 +1,3863 @@
+//region annotations
+/*:
+ * @target MZ
+ * @plugindesc
+ * [v1.5.0 PIXEL] Enables sub-tile (pixel-accurate) movement on the map.
+ * @author JE
+ * @url https://github.com/je-can-code/rmmz-plugins
+ * @base J-Base
+ * @orderAfter J-Base
+ * @orderAfter J-Base-Save
+ * @orderAfter J-ABS
+ * @help
+ * ============================================================================
+ * Please refer to J-Pixelistics's book for more details:
+ * https://github.com/je-can-code/rmmz-plugins/blob/main/docs/plugins/pixel/core/index.md
+ * ============================================================================
+ *
+ * @param collisionConfigs
+ * @text COLLISION SETUP
+ *
+ * @param collisionStepCount
+ * @parent collisionConfigs
+ * @type select
+ * @option 1 (coarse)
+ * @value 1
+ * @option 2 (medium)
+ * @value 2
+ * @option 4 (fine, default)
+ * @value 4
+ * @text Subcells Per Tile
+ * @desc The number of subcells to divide each tile into along each axis. Higher = more precise edges but more memory.
+ * @default 4
+ *
+ * @param collisionRadius
+ * @parent collisionConfigs
+ * @type number
+ * @decimals 2
+ * @min 0.05
+ * @max 0.49
+ * @text Collision Radius
+ * @desc Half-size of the character's square hitbox in tile units. 0.3 is a reasonable default.
+ * @default 0.30
+ *
+ * @param movementConfigs
+ * @text MOVEMENT
+ *
+ * @param vectorMovementEnabled
+ * @parent movementConfigs
+ * @type boolean
+ * @text Enable Vector (360°) Movement
+ * @desc When true, the player can move at any angle via analog stick or mouse direction. Falls back to 8-dir if no analog input.
+ * @default false
+ *
+ * @param footTouchEventDelayFrames
+ * @parent movementConfigs
+ * @type number
+ * @min 0
+ * @max 120
+ * @text Foot Touch Trigger Delay (frames)
+ * @desc After a map loads, suppress Player Touch / Event Touch on the tile under the player for this many frames (0 = off). Reduces spurious saves after load.
+ * @default 15
+ *
+ * @param debugConfigs
+ * @text DEBUG
+ *
+ * @param overlayInitiallyVisible
+ * @parent debugConfigs
+ * @type boolean
+ * @text Overlay Initially Visible
+ * @desc Show the subcell collision overlay on map load. Toggle at runtime with the backslash key.
+ * @default false
+ */
+//endregion annotations
+
+//#region src/plugins/pixel/core/_metadata/_pluginMetadata.js
+/**
+* Plugin metadata class for J-Pixelistics.
+*/
+var JPixelistics_PluginMetadata = class extends PluginMetadata {
+	/**
+	* Constructor.
+	* @param {string} name The plugin name.
+	* @param {string} version The plugin version.
+	*/
+	constructor(name, version) {
+		super(name, version);
+	}
+	/**
+	* Extends {@link #postInitialize}.<br/>
+	* Includes translation of plugin parameters.
+	*/
+	postInitialize() {
+		super.postInitialize();
+		this.initializeMetadata();
+	}
+	/**
+	* Initializes the metadata associated with this plugin.
+	*/
+	initializeMetadata() {
+		/**
+		* Whether or not 360-degree vector movement is enabled.
+		* When false, movement snaps to the standard 8 directions.
+		* @type {boolean}
+		*/
+		this.VectorMovementEnabled = this.parsedPluginParameters["vectorMovementEnabled"] === "true";
+		/**
+		* Frames after map setup during which player/event touch triggers underfoot are ignored.
+		* @type {number}
+		*/
+		this.FootTouchEventDelayFrames = J.BASE.Helpers.parsePluginInt(this.parsedPluginParameters["footTouchEventDelayFrames"], 15);
+		/**
+		* The number of subcells per tile axis to use for collision resolution.
+		* Valid values: 1, 2, or 4.
+		* @type {number}
+		*/
+		this.CollisionStepCount = parseInt(this.parsedPluginParameters["collisionStepCount"]) || 4;
+		/**
+		* The half-size of the character hitbox in tile units used for AABB collision.
+		* @type {number}
+		*/
+		this.CollisionRadius = parseFloat(this.parsedPluginParameters["collisionRadius"]) || .3;
+		/**
+		* Whether or not the subcell collision overlay should be visible on map load.
+		* @type {boolean}
+		*/
+		this.OverlayInitiallyVisible = this.parsedPluginParameters["overlayInitiallyVisible"] === "true";
+	}
+};
+
+//#endregion
+//#region src/plugins/pixel/core/_metadata/initialization.js
+/**
+* The core where all of my extensions live: in the `J` object.
+*/
+globalThis.J ||= {};
+/**
+* The plugin umbrella that governs all things related to this plugin.
+*/
+J.PIXEL = {};
+/**
+* The parent namespace for all J-Pixelistics extensions.
+*/
+J.PIXEL.EXT ||= {};
+/**
+* The metadata associated with this plugin.
+*/
+J.PIXEL.Metadata = new JPixelistics_PluginMetadata("J-Pixelistics", "1.5.0");
+/**
+* A collection of all aliased methods for this plugin.
+*/
+J.PIXEL.Aliased = {
+	Game_Character: new Map(),
+	Game_CharacterBase: new Map(),
+	Game_Event: new Map(),
+	Game_Follower: new Map(),
+	Game_Interpreter: new Map(),
+	Game_Map: new Map(),
+	Game_Player: new Map(),
+	Spriteset_Map: new Map()
+};
+/**
+* All regular expressions used by this plugin.
+*/
+J.PIXEL.RegExp = {};
+/**
+* The area an event's page covers: a rectangle of whole tiles whose top-left corner is the tile the
+* event itself stands on. Both sizes must be at least one, since an event always covers its own tile;
+* anything else does not match, and the page covers that one tile.
+*
+* <pre>
+* Structure:
+*  <areaEvent:[WIDTH, HEIGHT]>
+*
+* Example:
+*  <areaEvent:[5, 1]>
+*
+* Translation:
+*  This page covers the event's own tile and the four to the right of it.
+* </pre>
+* @type {RegExp}
+*/
+J.PIXEL.RegExp.AreaEvent = /<areaEvent:[ ]?(\[[ ]?[1-9]\d*[ ]?,[ ]?[1-9]\d*[ ]?])>/i;
+/**
+* A transfer from this page lands as far along its destination as the player stood along the page's
+* area, measured from the event's own tile.
+*
+* <pre>
+* Structure:
+*  <relativeTransfer>
+*
+* Example:
+*  <areaEvent:[20, 1]>
+*  <relativeTransfer>
+*
+* Translation:
+*  Crossing this 20-tile edge eight tiles from the event lands the player eight tiles to the right of
+*  where its Transfer Player points.
+* </pre>
+* @type {RegExp}
+*/
+J.PIXEL.RegExp.RelativeTransfer = /<relativeTransfer>/i;
+/**
+* Directional constants matching RMMZ engine conventions.
+* Defined here so the pixel core does not depend on J-ABS for basic direction numerics.
+*/
+J.PIXEL.Directions = {
+	DOWN: 2,
+	LEFT: 4,
+	RIGHT: 6,
+	UP: 8,
+	LOWERLEFT: 1,
+	LOWERRIGHT: 3,
+	UPPERLEFT: 7,
+	UPPERRIGHT: 9
+};
+
+//#endregion
+//#region src/plugins/pixel/core/_models/PixelDebugSampler.js
+/**
+* One-frame collision sampling traces for the pixel collision overlay.
+* Populated by pixel passage helpers and consumed by {@link Sprite_PixelCollisionOverlay}.
+*/
+var PixelDebugSampler = class PixelDebugSampler {
+	/**
+	* Controls whether subcell samples are collected.
+	* Set to true only when the collision overlay is actively visible.
+	* @type {boolean}
+	*/
+	static enabled = false;
+	/**
+	* @type {{x:number,y:number,color:string}[]}
+	*/
+	static samples = [];
+	/**
+	* Queues a subcell sample to be drawn this frame by the overlay.
+	* @param {number} x Fractional tile x (seam-aligned).
+	* @param {number} y Fractional tile y (seam-aligned).
+	* @param {string} color A rgba color string.
+	*/
+	static push(x, y, color) {
+		if (PixelDebugSampler.enabled === false) {
+			return;
+		}
+		PixelDebugSampler.samples.push({
+			x,
+			y,
+			color
+		});
+	}
+	/**
+	* Clears all queued samples at the end of each frame.
+	*/
+	static clear() {
+		PixelDebugSampler.samples.length = 0;
+	}
+};
+
+//#endregion
+//#region src/plugins/pixel/core/managers/PIXEL_CollisionManager.js
+/**
+* A static manager that builds and serves a subcell collision table per map.
+* It derives all subcell data only from the engine's tile passability.
+* No external plugin references are used.
+*/
+var PIXEL_CollisionManager = class {
+	/**
+	* Gets the table.
+	* @returns {number[]} The table.
+	*/
+	static table() {
+		return this._table;
+	}
+	/**
+	* Sets the table.
+	* @param {number[]} newTable The new table.
+	*/
+	static setTable(newTable) {
+		this._table = newTable;
+	}
+	/**
+	* Initializes configuration for collision table density and storage.
+	* Reads the step count from J.PIXEL.Metadata if available, otherwise defaults to 4.
+	*/
+	static initConfig() {
+		const metaCount = J.PIXEL && J.PIXEL.Metadata ? J.PIXEL.Metadata.CollisionStepCount : 4;
+		this.collisionStepCount = metaCount;
+		this.collisionSize = 1 / this.collisionStepCount;
+		this._table = [];
+	}
+	/**
+	* Builds the subcell collision table from the current map.
+	* Call on map setup after the map is loaded.
+	*/
+	static setupCollision() {
+		if (this.collisionStepCount === undefined) {
+			this.initConfig();
+		}
+		if (!$gameMap || !$dataMap) {
+			return;
+		}
+		const subW = $dataMap.width * this.collisionStepCount;
+		const subH = $dataMap.height * this.collisionStepCount;
+		this.setTable(new Array(subW * subH));
+		this._loadDefaultCollisionTable();
+	}
+	/**
+	* Populates the subcell collision table using engine tile passability.
+	*/
+	static _loadDefaultCollisionTable() {
+		for (let y = 0; y < $dataMap.height; y++) {
+			for (let x = 0; x < $dataMap.width; x++) {
+				const canBeEntered = this._canBeEntered(x, y);
+				if (canBeEntered === false) {
+					this._fillTile(x, y, this.Codes.Solid);
+					continue;
+				}
+				const passDown = $gameMap.isPassable(x, y, J.PIXEL.Directions.DOWN);
+				const passLeft = $gameMap.isPassable(x, y, J.PIXEL.Directions.LEFT);
+				const passRight = $gameMap.isPassable(x, y, J.PIXEL.Directions.RIGHT);
+				const passUp = $gameMap.isPassable(x, y, J.PIXEL.Directions.UP);
+				this._applyTileCollision(x, y, passDown, passLeft, passRight, passUp);
+			}
+		}
+	}
+	/**
+	* Whether a character on any neighboring tile could step into this one.
+	* @param {number} x The integer tile x.
+	* @param {number} y The integer tile y.
+	* @returns {boolean}
+	*/
+	static _canBeEntered(x, y) {
+		const { DOWN, LEFT, RIGHT, UP } = J.PIXEL.Directions;
+		return [
+			DOWN,
+			LEFT,
+			RIGHT,
+			UP
+		].some((side) => this._canEnterFrom(x, y, side));
+	}
+	/**
+	* Whether a character on the neighboring tile to one side could step into this one.
+	* @param {number} x The integer tile x.
+	* @param {number} y The integer tile y.
+	* @param {2|4|6|8} side The side of this tile the step would come in from.
+	* @returns {boolean}
+	*/
+	static _canEnterFrom(x, y, side) {
+		const neighborX = $gameMap.roundXWithDirection(x, side);
+		const neighborY = $gameMap.roundYWithDirection(y, side);
+		if ($gameMap.isValid(neighborX, neighborY) === false) return false;
+		const towardThisTile = 10 - side;
+		return $gameMap.isPassable(neighborX, neighborY, towardThisTile);
+	}
+	/**
+	* Computes the flattened index into the subcell table for a fractional coordinate.
+	* RAW indexer: no global shift applied here. Writers use this (build-time).
+	* @param {number} px The fractional x (tile units).
+	* @param {number} py The fractional y (tile units).
+	* @returns {number} The subcell index.
+	*/
+	static _index(px, py) {
+		const step = this.collisionStepCount;
+		const widthInSub = $gameMap.width() * step;
+		const heightInSub = $gameMap.height() * step;
+		let ix = Math.floor(px * step);
+		let iy = Math.floor(py * step);
+		ix = (ix % widthInSub + widthInSub) % widthInSub;
+		iy = (iy % heightInSub + heightInSub) % heightInSub;
+		return iy * widthInSub + ix;
+	}
+	/**
+	* Writes a collision code into the table at a fractional coordinate.
+	* @param {number} px The fractional x (tile units).
+	* @param {number} py The fractional y (tile units).
+	* @param {number} code The collision code to write.
+	*/
+	static _set(px, py, code) {
+		const idx = this._index(px, py);
+		this.table()[idx] = code;
+	}
+	/**
+	* Fills an entire integer tile with a single collision code.
+	* @param {number} x The integer tile x.
+	* @param {number} y The integer tile y.
+	* @param {number} code The collision code to fill with.
+	*/
+	static _fillTile(x, y, code) {
+		const step = this.collisionSize;
+		for (let subX = x; subX < x + 1; subX += step) {
+			for (let subY = y; subY < y + 1; subY += step) {
+				this._set(subX, subY, code);
+			}
+		}
+	}
+	/**
+	* Draws a one-subcell-thick edge line along a tile's boundary.
+	* @param {number} x The tile x.
+	* @param {number} y The tile y.
+	* @param {2|4|6|8} d The boundary direction to draw along.
+	* @param {number} code The collision code to write.
+	*/
+	static _drawEdge(x, y, d, code) {
+		const step = this.collisionSize;
+		if (d === J.PIXEL.Directions.DOWN || d === J.PIXEL.Directions.UP) {
+			const subY = d === J.PIXEL.Directions.DOWN ? y + 1 - step : y;
+			for (let subX = x; subX < x + 1; subX += step) {
+				this._set(subX, subY, code);
+			}
+			return;
+		}
+		const subX = d === J.PIXEL.Directions.RIGHT ? x + 1 - step : x;
+		for (let subY = y; subY < y + 1; subY += step) {
+			this._set(subX, subY, code);
+		}
+	}
+	/**
+	* Places a single corner subcell blocker at the specified tile corner.
+	* @param {number} x The tile x.
+	* @param {number} y The tile y.
+	* @param {4|6} horz The horizontal side (LEFT/RIGHT).
+	* @param {2|8} vert The vertical side (DOWN/UP).
+	* @param {number} code The collision code to write.
+	*/
+	static _drawCorner(x, y, horz, vert, code) {
+		const step = this.collisionSize;
+		const subY = vert === J.PIXEL.Directions.DOWN ? y + 1 - step : y;
+		const subX = horz === J.PIXEL.Directions.RIGHT ? x + 1 - step : x;
+		this._set(subX, subY, code);
+	}
+	/**
+	* Applies four direction passabilities to the tile's subcells using codes.
+	* @param {number} x The tile x.
+	* @param {number} y The tile y.
+	* @param {boolean} passDown Whether moving DOWN is allowed from this tile.
+	* @param {boolean} passLeft Whether moving LEFT is allowed from this tile.
+	* @param {boolean} passRight Whether moving RIGHT is allowed from this tile.
+	* @param {boolean} passUp Whether moving UP is allowed from this tile.
+	*/
+	static _applyTileCollision(x, y, passDown, passLeft, passRight, passUp) {
+		if (passDown === passLeft && passDown === passRight && passDown === passUp) {
+			const code = passDown === true ? this.Codes.Open : this.Codes.Solid;
+			this._fillTile(x, y, code);
+			return;
+		}
+		if (this.collisionStepCount === 1) {
+			const merged = this._mergeSingleTile(!passUp, !passDown, !passLeft, !passRight);
+			this._set(x, y, merged);
+			return;
+		}
+		this._fillTile(x, y, this.Codes.Open);
+		if (passLeft === false) {
+			this._drawEdge(x, y, J.PIXEL.Directions.LEFT, this.Codes.EdgeLeft);
+		}
+		if (passRight === false) {
+			this._drawEdge(x, y, J.PIXEL.Directions.RIGHT, this.Codes.EdgeRight);
+		}
+		if (passDown === false) {
+			this._drawEdge(x, y, J.PIXEL.Directions.DOWN, this.Codes.EdgeDown);
+			if (passLeft === false) {
+				this._drawCorner(x, y, J.PIXEL.Directions.LEFT, J.PIXEL.Directions.DOWN, this.Codes.CornerBottomLeft);
+			}
+			if (passRight === false) {
+				this._drawCorner(x, y, J.PIXEL.Directions.RIGHT, J.PIXEL.Directions.DOWN, this.Codes.CornerBottomRight);
+			}
+		}
+		if (passUp === false) {
+			this._drawEdge(x, y, J.PIXEL.Directions.UP, this.Codes.EdgeUp);
+			if (passLeft === false) {
+				this._drawCorner(x, y, J.PIXEL.Directions.LEFT, J.PIXEL.Directions.UP, this.Codes.CornerTopLeft);
+			}
+			if (passRight === false) {
+				this._drawCorner(x, y, J.PIXEL.Directions.RIGHT, J.PIXEL.Directions.UP, this.Codes.CornerTopRight);
+			}
+		}
+	}
+	/**
+	* Folds the four blocked-edge booleans into the single number that identifies their combination.
+	*
+	* Sixteen combinations exist and eleven of them name a tile shape, which is a lookup rather than
+	* a decision tree once the four booleans stop being four separate questions.
+	* @param {boolean} blockUp Whether the up edge is blocked.
+	* @param {boolean} blockDown Whether the down edge is blocked.
+	* @param {boolean} blockLeft Whether the left edge is blocked.
+	* @param {boolean} blockRight Whether the right edge is blocked.
+	* @returns {number} The UDLR bitmask.
+	*/
+	static toEdgeMask(blockUp, blockDown, blockLeft, blockRight) {
+		const { Up, Down, Left, Right } = this.EdgeBits;
+		let mask = 0;
+		if (blockUp) mask |= Up;
+		if (blockDown) mask |= Down;
+		if (blockLeft) mask |= Left;
+		if (blockRight) mask |= Right;
+		return mask;
+	}
+	/**
+	* Merges directional edge blocks into a single code when only one subcell is used.
+	* @param {boolean} blockUp Whether the up edge is blocked.
+	* @param {boolean} blockDown Whether the down edge is blocked.
+	* @param {boolean} blockLeft Whether the left edge is blocked.
+	* @param {boolean} blockRight Whether the right edge is blocked.
+	* @returns {number} The representative collision code.
+	*/
+	static _mergeSingleTile(blockUp, blockDown, blockLeft, blockRight) {
+		const mask = this.toEdgeMask(blockUp, blockDown, blockLeft, blockRight);
+		return this.SingleTileMerges[mask] ?? this.Codes.Open;
+	}
+	/**
+	* Determines if a fractional subcell allows movement in a given direction.
+	* Applies the global half-tile grid shift on READS to align with visual seams.
+	* @param {number} px The fractional x (tile units).
+	* @param {number} py The fractional y (tile units).
+	* @param {2|4|6|8} d The entering direction.
+	* @returns {boolean} True if passable, false otherwise.
+	*/
+	static isPositionPassable(px, py, d) {
+		const sx = px + this.GridShiftX;
+		const sy = py + this.GridShiftY;
+		const tx = Math.floor(sx);
+		const ty = Math.floor(sy);
+		if (tx < 0 || ty < 0 || tx >= $gameMap.width() || ty >= $gameMap.height()) {
+			return false;
+		}
+		const code = this.table()[this._index(sx, sy)] || this.Codes.Open;
+		const predicate = this.PassagePredicates[code];
+		if (predicate === undefined) return true;
+		return predicate(d);
+	}
+};
+/**
+* Attach an enumeration of collision codes to the manager class.
+* These codes represent the logical shape located at a given subcell.
+*/
+PIXEL_CollisionManager.Codes = {
+	Open: 1,
+	Solid: 2,
+	VerticalLine: 4,
+	HorizontalLine: 5,
+	EdgeLeft: 14,
+	EdgeRight: 16,
+	EdgeDown: 12,
+	EdgeUp: 18,
+	CornerBottomLeft: 11,
+	CornerBottomRight: 13,
+	CornerTopLeft: 17,
+	CornerTopRight: 19
+};
+/**
+* The bit each blocked edge contributes to a tile's edge mask.
+*
+* Attached beside {@link PIXEL_CollisionManager.Codes} rather than declared in the class body,
+* because {@link PIXEL_CollisionManager.SingleTileMerges} below reads the codes and a static field
+* inside the class would be evaluated before either table exists.
+* @type {{Up: number, Down: number, Left: number, Right: number}}
+*/
+PIXEL_CollisionManager.EdgeBits = {
+	Up: 8,
+	Down: 4,
+	Left: 2,
+	Right: 1
+};
+/**
+* The collision code each combination of blocked edges merges into, keyed by edge mask.
+*
+* Eleven of the sixteen combinations name a shape. The five absent ones are the empty mask and the
+* four holding exactly three blocked edges, which no tile shape draws; those fall through to open.
+*
+* A plugin introducing a collision code of its own registers the mask that produces it here, rather
+* than this manager growing a branch per shape somebody else invented.
+* @type {Object<number, number>}
+*/
+PIXEL_CollisionManager.SingleTileMerges = {
+	15: PIXEL_CollisionManager.Codes.Solid,
+	12: PIXEL_CollisionManager.Codes.VerticalLine,
+	3: PIXEL_CollisionManager.Codes.HorizontalLine,
+	8: PIXEL_CollisionManager.Codes.EdgeUp,
+	4: PIXEL_CollisionManager.Codes.EdgeDown,
+	2: PIXEL_CollisionManager.Codes.EdgeLeft,
+	1: PIXEL_CollisionManager.Codes.EdgeRight,
+	10: PIXEL_CollisionManager.Codes.CornerTopLeft,
+	9: PIXEL_CollisionManager.Codes.CornerTopRight,
+	6: PIXEL_CollisionManager.Codes.CornerBottomLeft,
+	5: PIXEL_CollisionManager.Codes.CornerBottomRight
+};
+/**
+* The predicates deciding whether a subcell may be entered, keyed by collision code.
+*
+* A predicate receives the entering direction and answers whether the move is allowed. Splitting
+* the decision this way is what lets a plugin add a collision code and teach passability about it
+* from its own tree, instead of every new shape needing another branch in
+* {@link PIXEL_CollisionManager.isPositionPassable}. A code with no predicate is treated as
+* passable there.
+* @type {Object<number, function(number): boolean>}
+*/
+PIXEL_CollisionManager.PassagePredicates = {
+	[PIXEL_CollisionManager.Codes.Open]: () => true,
+	[PIXEL_CollisionManager.Codes.Solid]: () => false,
+	[PIXEL_CollisionManager.Codes.VerticalLine]: (direction) => direction !== J.PIXEL.Directions.UP && direction !== J.PIXEL.Directions.DOWN,
+	[PIXEL_CollisionManager.Codes.HorizontalLine]: (direction) => direction !== J.PIXEL.Directions.LEFT && direction !== J.PIXEL.Directions.RIGHT,
+	[PIXEL_CollisionManager.Codes.EdgeLeft]: (direction) => direction !== J.PIXEL.Directions.LEFT,
+	[PIXEL_CollisionManager.Codes.EdgeRight]: (direction) => direction !== J.PIXEL.Directions.RIGHT,
+	[PIXEL_CollisionManager.Codes.EdgeDown]: (direction) => direction !== J.PIXEL.Directions.DOWN,
+	[PIXEL_CollisionManager.Codes.EdgeUp]: (direction) => direction !== J.PIXEL.Directions.UP,
+	[PIXEL_CollisionManager.Codes.CornerTopLeft]: () => false,
+	[PIXEL_CollisionManager.Codes.CornerTopRight]: () => false,
+	[PIXEL_CollisionManager.Codes.CornerBottomLeft]: () => false,
+	[PIXEL_CollisionManager.Codes.CornerBottomRight]: () => false
+};
+/**
+* Global collision-lattice shift (in tiles) applied on the X axis inside the indexer.
+* Use +0.5 when character/world coords are edge-based but movement logic expects center alignment.
+* Flip to -0.5 if your incoming sample coords are already center-shifted elsewhere.
+* @type {number}
+*/
+PIXEL_CollisionManager.GridShiftX = 0;
+/**
+* Global collision-lattice shift (in tiles) applied on the Y axis inside the indexer.
+* See GridShiftX for guidance on selecting the sign.
+* @type {number}
+*/
+PIXEL_CollisionManager.GridShiftY = 0;
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Character.js
+/**
+* The set of move route command codes that should be repeated per subcell when in pixel mode.
+* These correspond to the "Move X" commands in RPG Maker's event move route.
+* @type {number[]}
+*/
+Game_Character.pixelRepeatableMoveCommandCodes = [
+	1,
+	2,
+	3,
+	4,
+	5,
+	6,
+	7,
+	8,
+	9,
+	10,
+	11,
+	12,
+	13
+];
+/**
+* Extends {@link processMoveCommand}.<br/>
+* Ensures when move routes are being processed, that we adjust the x,y coordinates.
+* @param {RPG_EventListCommand} command The commands associated with this movement.
+*/
+J.PIXEL.Aliased.Game_Character.set("processMoveCommand", Game_Character.prototype.processMoveCommand);
+Game_Character.prototype.processMoveCommand = function(command) {
+	this.setMovePressed(false);
+	J.PIXEL.Aliased.Game_Character.get("processMoveCommand").call(this, command);
+};
+/**
+* Overwrites {@link #searchLimit}.<br/>
+* Uses a different value to have a broader search distance.
+* @returns {number}
+*/
+Game_Character.prototype.searchLimit = function() {
+	return 40;
+};
+/**
+* Overwrites {@link Game_Character#findDirectionTo}.<br/>
+* Searches between the tiles both ends actually stand on, through J-Base's {@link TilePathSearch}.
+*
+* The engine's search starts from the character's own coordinates and treats them as a tile, which
+* only holds while coordinates are whole numbers. Under pixel movement they rarely are, and a search
+* starting from 30.6 explores 30.6, 31.6, 32.6 and onward, so it can never arrive at a whole-numbered
+* goal. Every search then runs to its limit - with forty steps, the whole neighborhood - and settles
+* for whichever point it explored came closest. Rounding both ends onto the grid lets it arrive.
+*
+* Everything else is the engine's own: standing exactly on the goal answers nothing, the four
+* directions are tried in its order, and when no step gets any closer - which includes both ends
+* sharing a tile - it heads straight for the goal along whichever axis is farther off.
+*
+* Two things keep it cheap. A search that has just failed from the same tile toward the same goal is
+* answered from {@link PathSearchMemory} rather than asked again, and a search that does run looks
+* events up by tile through {@link Game_Map#searchWithEventIndex} instead of walking all of them at
+* every step it considers.
+* @param {number} goalX The x coordinate to reach.
+* @param {number} goalY The y coordinate to reach.
+* @returns {number} The direction to step in, or 0 when there is nowhere to go.
+*/
+Game_Character.prototype.findDirectionTo = function(goalX, goalY) {
+	if (this.x === goalX && this.y === goalY) return 0;
+	const startX = Math.round(this.x);
+	const startY = Math.round(this.y);
+	const request = {
+		startX,
+		startY,
+		goalX: Math.round(goalX),
+		goalY: Math.round(goalY),
+		searchLimit: this.searchLimit(),
+		mapWidth: $gameMap.width(),
+		directions: [
+			2,
+			4,
+			6,
+			8
+		],
+		stepFrom: (x, y, direction) => ({
+			x: $gameMap.roundXWithDirection(x, direction),
+			y: $gameMap.roundYWithDirection(y, direction)
+		}),
+		canStep: (x, y, direction) => this.canPass(x, y, direction),
+		distance: (x1, y1, x2, y2) => $gameMap.distance(x1, y1, x2, y2)
+	};
+	const { x: stepX, y: stepY } = PathSearchMemory.firstStep(this, "straight", Graphics.frameCount, request, (search) => $gameMap.searchWithEventIndex(() => TilePathSearch.firstStep(search)));
+	const deltaX = $gameMap.deltaX(stepX, startX);
+	const deltaY = $gameMap.deltaY(stepY, startY);
+	if (deltaY > 0) return 2;
+	if (deltaX < 0) return 4;
+	if (deltaX > 0) return 6;
+	if (deltaY < 0) return 8;
+	const deltaToGoalX = this.deltaXFrom(goalX);
+	const deltaToGoalY = this.deltaYFrom(goalY);
+	if (Math.abs(deltaToGoalX) > Math.abs(deltaToGoalY)) {
+		return deltaToGoalX > 0 ? 4 : 6;
+	}
+	if (deltaToGoalY !== 0) {
+		return deltaToGoalY > 0 ? 8 : 2;
+	}
+	return 0;
+};
+/**
+* Extends {@link #updateRoutineMove}.<br/>
+* Repeats move-route movement commands by the collision step count so that
+* scripted movement (event pages, move routes) covers the intended full-tile distance.
+* JABS actions are excluded and use default logic unchanged.
+*/
+J.PIXEL.Aliased.Game_Character.set("updateRoutineMove", Game_Character.prototype.updateRoutineMove);
+Game_Character.prototype.updateRoutineMove = function() {
+	if (J.ABS && this.isJabsAction()) {
+		J.PIXEL.Aliased.Game_Character.get("updateRoutineMove").call(this);
+		return;
+	}
+	this.handlePixelRoutineMove();
+};
+/**
+* Handles updating event move routes with pixel-aware repetition.
+* Repeats each movement command by the collision step count before advancing
+* to the next command in the route, so scripted movement covers the full tile.
+*/
+Game_Character.prototype.handlePixelRoutineMove = function() {
+	if (this.waitCount() > 0) {
+		this.setWaitCount(this.waitCount() - 1);
+		return;
+	}
+	this.setMovementSuccess(true);
+	const command = this.moveRoute().list[this.moveRouteIndex()];
+	if (command === undefined) return;
+	if (this.canStartPixelRepeatMove(command)) {
+		this.beginRepeatMove();
+		this.setRepeatMoveCount(this.pixelRepeatCountForRoute());
+	}
+	this.processMoveCommand(command);
+	if (this.isRepeatMoveActive()) {
+		this.decrementRepeatMoveCount();
+		if (this.getRepeatMoveCount() === 0) {
+			this.stopRepeatMove();
+		}
+	}
+	if (this.isRepeatMoveActive() === false) {
+		this.advanceMoveRouteIndex();
+	}
+};
+/**
+* Determines whether a repeat cycle should be started for the given command.
+* @param {RPG_EventListCommand} command The current move route command.
+* @returns {boolean} True if a new repeat cycle should begin.
+*/
+Game_Character.prototype.canStartPixelRepeatMove = function(command) {
+	if (this.isRepeatMoveActive()) return false;
+	if (Game_Character.pixelRepeatableMoveCommandCodes.includes(command.code) === false) return false;
+	return true;
+};
+/**
+* Overwrites {@link Game_Character.moveRandom}.<br/>
+* Vanilla rolls a brand-new random cardinal direction on every single call. Under pixel
+* movement, {@link Game_Character#handlePixelRoutineMove} repeats a "Move Random" route
+* command every frame to cover a full tile's worth of sub-pixel distance, so the vanilla
+* version re-rolls dozens of times before a tile is crossed - visibly twitching in place
+* instead of travelling. This caches the rolled direction using the same micro-route hold
+* primitives ({@link Game_CharacterBase#setMicroRouteDirection} etc.) already used by JABS'
+* AI idle-wander/retreat logic, and reuses it for one full tile's worth of frames.
+*/
+Game_Character.prototype.moveRandom = function() {
+	if (this.isMicroRouting()) {
+		this.moveStraight(this.getMicroRouteDirection());
+		this.decrementMicroRouteFrames();
+		return;
+	}
+	const direction = 2 + Math.floor(Math.random() * 4) * 2;
+	this.setMicroRouteDirection(direction);
+	this.setMicroRouteFrames(this.pixelRepeatCountForRoute());
+	this.moveStraight(direction);
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_CharacterBase.js
+/**
+* Extends {@link Game_CharacterBase.initMembers}.<br/>
+* Includes this plugin's extra properties as well.
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("initMembers", Game_CharacterBase.prototype.initMembers);
+Game_CharacterBase.prototype.initMembers = function() {
+	J.PIXEL.Aliased.Game_CharacterBase.get("initMembers").call(this);
+	this.initPixelMovementMembers();
+};
+/**
+* Initializes the new members related to this plugin.
+* Uses ??= so that pre-existing values on a loaded save are never overwritten,
+* making this method safe to call defensively at any point.
+*/
+Game_CharacterBase.prototype.initPixelMovementMembers = function() {
+	/**
+	* The shared root namespace for all of J's plugin data.
+	*/
+	this._j ||= {};
+	/**
+	* The pixel movement namespace, scoped under _j to avoid collisions
+	* with properties introduced by other plugins.
+	*/
+	this._j._pixel ||= {};
+	/**
+	* The collection for tracking the {@link Point} coordinates for all members.
+	* This is managed in a first-in-first-out (FIFO) style.
+	* @type {Point[]}
+	*/
+	this._j._pixel._positionalRecords ??= [];
+	/**
+	* Whether or not one of the directional inputs are being held down.
+	* @type {boolean} True if at least one direction is being held, false otherwise.
+	*/
+	this._j._pixel._movePressing ??= false;
+	/**
+	* The move distance for tracking steps.
+	* @type {number}
+	*/
+	this._j._pixel._moveDistance ??= 0;
+	/**
+	* The number of steps this character has taken.
+	* @type {number}
+	*/
+	this._j._pixel._steps ??= 0;
+	/**
+	* Cooldown frames after a pixel move before another can be issued.
+	* Prevents AllyAI from pushing every single frame.
+	* @type {number}
+	*/
+	this._j._pixel._moveCooldown ??= 0;
+	/**
+	* Whether a pixel-route repeat is currently active for this character.
+	* Used to repeat a single move-route command multiple times to cover the intended distance.
+	* @type {boolean}
+	*/
+	this._j._pixel._repeatMoveActive ??= false;
+	/**
+	* How many remaining repeat-ticks are left for the current route command.
+	* @type {number}
+	*/
+	this._j._pixel._repeatMoveCount ??= 0;
+	/**
+	* Flag indicating whether a pixel step occurred this frame.
+	* Used to preserve walk animation even when render coords snap each update.
+	* @type {boolean}
+	*/
+	this._j._pixel._movedThisFrame ??= false;
+	/**
+	* The cached direction for the micro-route (if any).
+	* @type {number}
+	*/
+	this._j._pixel._mrDir ??= 0;
+	/**
+	* The remaining frames to apply the cached micro-route direction.
+	* @type {number}
+	*/
+	this._j._pixel._mrFrames ??= 0;
+};
+/**
+* Returns the pixel movement state namespace for this character.
+* `initMembers` is aliased to seed this namespace, so it is always present.
+* @returns {object} The `this._j._pixel` state object.
+*/
+Game_CharacterBase.prototype._pixelState = function() {
+	return this._j._pixel;
+};
+/**
+* Gets the remaining cooldown frames before another pixel move can be issued.
+* @returns {number} The remaining cooldown frames.
+*/
+Game_CharacterBase.prototype.getPixelMoveCooldown = function() {
+	return this._pixelState()._moveCooldown;
+};
+/**
+* Sets the remaining cooldown frames for pixel movement.
+* @param {number} frames The number of frames to set for cooldown.
+*/
+Game_CharacterBase.prototype.setPixelMoveCooldown = function(frames) {
+	this._pixelState()._moveCooldown = frames;
+};
+/**
+* Gets whether or not a pixel-route command repeat is currently active.
+* @returns {boolean} True if a repeat is ongoing, false otherwise.
+*/
+Game_CharacterBase.prototype.isRepeatMoveActive = function() {
+	return this._pixelState()._repeatMoveActive === true;
+};
+/**
+* Begins a pixel-route command repeat cycle.
+*/
+Game_CharacterBase.prototype.beginRepeatMove = function() {
+	this._pixelState()._repeatMoveActive = true;
+};
+/**
+* Ends the current pixel-route command repeat cycle.
+*/
+Game_CharacterBase.prototype.stopRepeatMove = function() {
+	this._pixelState()._repeatMoveActive = false;
+};
+/**
+* Gets how many repeat-ticks remain for the current route command.
+* @returns {number} The remaining repeat count.
+*/
+Game_CharacterBase.prototype.getRepeatMoveCount = function() {
+	return this._pixelState()._repeatMoveCount;
+};
+/**
+* Sets the repeat-tick counter to a given number.
+* @param {number} count The number of ticks to hold the current command.
+*/
+Game_CharacterBase.prototype.setRepeatMoveCount = function(count) {
+	this._pixelState()._repeatMoveCount = count;
+};
+/**
+* Decrements the repeat-tick counter by one.
+*/
+Game_CharacterBase.prototype.decrementRepeatMoveCount = function() {
+	if (this.getRepeatMoveCount() > 0) {
+		this.setRepeatMoveCount(this.getRepeatMoveCount() - 1);
+	}
+};
+/**
+* Gets the default repeat count for a single route command based on collision density.
+* This ensures that scripted movement commands cover the full intended tile distance.
+* @returns {number} The collision step count.
+*/
+Game_CharacterBase.prototype.pixelRepeatCountForRoute = function() {
+	return Math.ceil(1 / this.distancePerFrame());
+};
+/**
+* Decrements the pixel-move cooldown by one frame if applicable.
+*/
+Game_CharacterBase.prototype.decrementPixelMoveCooldown = function() {
+	if (this.getPixelMoveCooldown() > 0) {
+		this.setPixelMoveCooldown(this.getPixelMoveCooldown() - 1);
+	}
+};
+/**
+* Determines whether or not we are currently on a cooldown for pixel movement.
+* @returns {boolean}
+*/
+Game_CharacterBase.prototype.isPixelOnCooldown = function() {
+	return this.getPixelMoveCooldown() > 0;
+};
+/**
+* Flags whether or not this character performed a pixel step this frame.
+* @param {boolean=} moved Whether or not we moved this frame; defaults to true.
+*/
+Game_CharacterBase.prototype.setMovedThisFrame = function(moved = true) {
+	this._pixelState()._movedThisFrame = moved;
+};
+/**
+* Gets whether or not this character performed a pixel step this frame.
+* @returns {boolean} True if we moved this frame, false otherwise.
+*/
+Game_CharacterBase.prototype.didMoveThisFrame = function() {
+	return this._pixelState()._movedThisFrame === true;
+};
+/**
+* Clears the per-frame pixel movement flag.
+*/
+Game_CharacterBase.prototype.clearMovedThisFrame = function() {
+	this._pixelState()._movedThisFrame = false;
+};
+/**
+* Gets the cached micro-route direction.
+* @returns {number} The cached 8-dir code, or 0 if unset.
+*/
+Game_CharacterBase.prototype.getMicroRouteDirection = function() {
+	return this._pixelState()._mrDir;
+};
+/**
+* Sets the cached micro-route direction.
+* @param {number} newDirection The 8-dir code to cache.
+*/
+Game_CharacterBase.prototype.setMicroRouteDirection = function(newDirection) {
+	this._pixelState()._mrDir = newDirection;
+};
+/**
+* Gets the remaining micro-route frames.
+* @returns {number} The remaining frames for the cached direction.
+*/
+Game_CharacterBase.prototype.getMicroRouteFrames = function() {
+	return this._pixelState()._mrFrames;
+};
+/**
+* Sets the remaining micro-route frames to apply the cached direction.
+* @param {number} frames The number of frames to hold the cached direction.
+*/
+Game_CharacterBase.prototype.setMicroRouteFrames = function(frames) {
+	this._pixelState()._mrFrames = frames;
+};
+/**
+* Decrements the remaining micro-route frames by one if applicable.
+*/
+Game_CharacterBase.prototype.decrementMicroRouteFrames = function() {
+	if (this.getMicroRouteFrames() > 0) {
+		this.setMicroRouteFrames(this.getMicroRouteFrames() - 1);
+	}
+};
+/**
+* Clears the cached micro-route direction and remaining frames.
+*/
+Game_CharacterBase.prototype.clearMicroRoute = function() {
+	this.setMicroRouteDirection(0);
+	this.setMicroRouteFrames(0);
+};
+/**
+* Gets whether or not this character is currently following a cached micro-route.
+* @returns {boolean} True if there are frames remaining, false otherwise.
+*/
+Game_CharacterBase.prototype.isMicroRouting = function() {
+	return this.getMicroRouteFrames() > 0;
+};
+/**
+* Gets the collection of positional records for this character.
+* @returns {Point[]}
+*/
+Game_CharacterBase.prototype.positionalRecords = function() {
+	return this._pixelState()._positionalRecords;
+};
+/**
+* Clears the positional cache for characters on the map.
+*/
+Game_CharacterBase.prototype.clearPositionalRecords = function() {
+	this._pixelState()._positionalRecords = [];
+};
+/**
+* Adds a positional record to the collection and maintains the max collection size.
+* @param {Point} positionalRecord A single positional record as a point.
+*/
+Game_CharacterBase.prototype.addPositionalRecord = function(positionalRecord) {
+	const records = this.positionalRecords();
+	records.push(positionalRecord);
+	while (records.length > 10) {
+		records.shift();
+	}
+};
+/**
+* Gets the first-added record from the collection of coordinate tracking.
+* @returns {Point|null} The oldest tracked point, or null if no records exist yet.
+*/
+Game_CharacterBase.prototype.oldestPositionalRecord = function() {
+	const records = this.positionalRecords();
+	if (records.length > 0) {
+		return records.at(0);
+	}
+	return null;
+};
+/**
+* Gets the last-added record from the collection of coordinate tracking.
+* @returns {Point|null} The most recently tracked point, or null if no records exist yet.
+*/
+Game_CharacterBase.prototype.mostRecentPositionalRecord = function() {
+	const records = this.positionalRecords();
+	if (records.length > 0) {
+		return records.at(-1);
+	}
+	return null;
+};
+/**
+* Extends {@link Game_CharacterBase.update}.<br/>
+* Ensures render coordinates match logical coordinates and clears per-frame flags.
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("update", Game_CharacterBase.prototype.update);
+Game_CharacterBase.prototype.update = function() {
+	J.PIXEL.Aliased.Game_CharacterBase.get("update").call(this);
+	if ((this.realX() !== this.x || this.realY() !== this.y) && !this.isJumping()) {
+		this.setRealX(this.x);
+		this.setRealY(this.y);
+	}
+	if (this.isPixelOnCooldown()) {
+		this.decrementPixelMoveCooldown();
+	}
+	if (this.didMoveThisFrame()) {
+		this.clearMovedThisFrame();
+	}
+};
+/**
+* Gets the move distance this character has moved.
+* @returns {number}
+*/
+Game_CharacterBase.prototype.moveDistance = function() {
+	return this._pixelState()._moveDistance;
+};
+/**
+* Modifies the move distance by a given amount.
+* @param {number} distance The distance in pixels.
+*/
+Game_CharacterBase.prototype.modMoveDistance = function(distance) {
+	this._pixelState()._moveDistance += distance;
+};
+/**
+* Gets how many pixel steps this character has taken.
+* @returns {number}
+*/
+Game_CharacterBase.prototype.pixelSteps = function() {
+	return this._pixelState()._steps;
+};
+/**
+* Modifies the pixel step counter.
+* @param {number=} steps The number of steps to take; defaults to 1.
+*/
+Game_CharacterBase.prototype.takePixelSteps = function(steps = 1) {
+	this._pixelState()._steps += steps;
+};
+/**
+* Clears the number of pixel steps taken by this character.
+*/
+Game_CharacterBase.prototype.clearPixelSteps = function() {
+	this._pixelState()._steps = 0;
+};
+/**
+* Checks if this character has moved far enough to be considered a "step".
+*/
+Game_CharacterBase.prototype.updatePixelStepping = function() {
+	const tookStep = this.moveDistance() >= this.stepDistance();
+	if (tookStep) {
+		this.onStep();
+		this.clearMoveDistance();
+	}
+};
+/**
+* Resets the move distance for this character.
+*/
+Game_CharacterBase.prototype.clearMoveDistance = function() {
+	this._pixelState()._moveDistance = 0;
+};
+/**
+* Extends {@link Game_CharacterBase.isMoving}.<br/>
+* Includes whether or not a pixel movement occurred this frame.
+* @returns {boolean}
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("isMoving", Game_CharacterBase.prototype.isMoving);
+Game_CharacterBase.prototype.isMoving = function() {
+	const original = J.PIXEL.Aliased.Game_CharacterBase.get("isMoving").call(this);
+	const movedThisFrame = this.didMoveThisFrame();
+	return original || movedThisFrame;
+};
+/**
+* Gets whether or not the move input is being pressed.
+* @returns {boolean}
+*/
+Game_CharacterBase.prototype.isMovePressed = function() {
+	return this._pixelState()._movePressing;
+};
+/**
+* Sets whether or not the move input is being held down.
+* @param {boolean} pressed The new value of whether or not the button is being pressed.
+*/
+Game_CharacterBase.prototype.setMovePressed = function(pressed) {
+	this._pixelState()._movePressing = pressed;
+};
+/**
+* Adds a hook for performing actions when this character takes a step.
+*/
+Game_CharacterBase.prototype.onStep = function() {
+	this.takePixelSteps(1);
+};
+/**
+* Gets the distance that it takes to travel to achieve one step.
+* @returns {number}
+*/
+Game_CharacterBase.prototype.stepDistance = function() {
+	return 1;
+};
+/**
+* Records this character's current fractional position into the breadcrumb trail.
+* Keeps a rolling window of the last 10 positions for follower-train chasing.
+* Flushes the cache when the player teleports (delta > 2 tiles).
+*/
+Game_CharacterBase.prototype.recordPixelPosition = function() {
+	const last = this.mostRecentPositionalRecord();
+	const deltaDistance = last === null ? 0 : $gameMap.distance(last.x, last.y, this.x, this.y);
+	if (deltaDistance > 2) {
+		this.clearPositionalRecords();
+	} else if (last === null || deltaDistance > .1) {
+		const point = {
+			x: this.x,
+			y: this.y
+		};
+		this.addPositionalRecord(point);
+	}
+};
+/**
+* Forcefully relocates this character to a different set of coordinates.
+* @param {number} x The x coordinate.
+* @param {number} y The y coordinate.
+*/
+Game_CharacterBase.prototype.relocate = function(x, y) {
+	this.setX(x);
+	this.setY(y);
+	this.setRealX(x);
+	this.setRealY(y);
+	this.setStopCount(0);
+};
+/**
+* Enables the "pixel moving" state and updates pixel position.
+*/
+Game_CharacterBase.prototype.startPixelMoving = function() {
+	this.setMovePressed(true);
+	this.recordPixelPosition();
+};
+/**
+* Disables the "pixel moving" state and updates pixel position.
+*/
+Game_CharacterBase.prototype.stopPixelMoving = function() {
+	this.setMovePressed(false);
+	this.setRealX(this.x);
+	this.setRealY(this.y);
+	this.recordPixelPosition();
+};
+/**
+* Determine the distance per frame when moving diagonally.
+* It is reduced thanks to the power of math.
+* @returns {number} The distance in pixels to move.
+*/
+Game_CharacterBase.prototype.diagonalDistancePerFrame = function() {
+	return this.distancePerFrame() * Math.SQRT1_2;
+};
+/**
+* Moves this character in the given direction a given distance in pixels.
+*
+* This is used in tandem with movement control and not intended to move characters otherwise.
+* @param {1|2|3|4|6|7|8|9} direction The direction to move.
+* @param {number} distance The number of pixels to move.
+*/
+Game_CharacterBase.prototype.movePixelDistance = function(direction, distance) {
+	const prevX = this.x;
+	const prevY = this.y;
+	const isStraight = this.isStraightDirection(direction);
+	const isDiagonal = this.isDiagonalDirection(direction);
+	if (isStraight) {
+		this.moveStraightDistance(direction, distance);
+	} else if (isDiagonal) {
+		this.moveDiagonalDistance(direction, distance);
+	}
+	const radius = this.getEffectiveRadius();
+	if (this.isThrough() === false && this.isDebugThrough() === false && this.isOverlappingSolidTiles(this.x + this.getCollisionPivotX(), this.y + this.getCollisionPivotY(), radius)) {
+		this.setX(prevX);
+		this.setY(prevY);
+		this.setRealX(this.x);
+		this.setRealY(this.y);
+		this.setMovementSuccess(false);
+		return;
+	}
+	this.setMovedThisFrame(true);
+	this.setRealX(this.x);
+	this.setRealY(this.y);
+	this.modMoveDistance(distance);
+	this.updatePixelStepping();
+};
+/**
+* Moves this character one of the four cardinal directions a given distance in pixels.
+* @param {2|4|6|8} direction The straight direction to move.
+* @param {number} pixelDistance The number of pixels to move in that direction.
+*/
+Game_CharacterBase.prototype.moveStraightDistance = function(direction, pixelDistance) {
+	switch (direction) {
+		case J.PIXEL.Directions.DOWN:
+			this.moveStraight2Down(pixelDistance);
+			break;
+		case J.PIXEL.Directions.LEFT:
+			this.moveStraight4Left(pixelDistance);
+			break;
+		case J.PIXEL.Directions.RIGHT:
+			this.moveStraight6Right(pixelDistance);
+			break;
+		case J.PIXEL.Directions.UP:
+			this.moveStraight8Up(pixelDistance);
+			break;
+	}
+};
+/**
+* Moves this character one one of the four cardinal directions.
+* @param {1|3|7|9} direction The straight direction to move.
+* @param {number} pixelDistance The number of pixels to move in that direction.
+*/
+Game_CharacterBase.prototype.moveDiagonalDistance = function(direction, pixelDistance) {
+	switch (direction) {
+		case J.PIXEL.Directions.LOWERLEFT:
+			this.moveDiagonal1DownLeft(pixelDistance);
+			break;
+		case J.PIXEL.Directions.LOWERRIGHT:
+			this.moveDiagonal3DownRight(pixelDistance);
+			break;
+		case J.PIXEL.Directions.UPPERLEFT:
+			this.moveDiagonal7UpLeft(pixelDistance);
+			break;
+		case J.PIXEL.Directions.UPPERRIGHT:
+			this.moveDiagonal9UpRight(pixelDistance);
+			break;
+	}
+};
+/**
+* Move straight down the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveStraight2Down = function(pixelDistance) {
+	this.setY(this.y + pixelDistance);
+};
+/**
+* Move straight left the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveStraight4Left = function(pixelDistance) {
+	this.setX(this.x - pixelDistance);
+};
+/**
+* Move straight right the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveStraight6Right = function(pixelDistance) {
+	this.setX(this.x + pixelDistance);
+};
+/**
+* Move straight up the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveStraight8Up = function(pixelDistance) {
+	this.setY(this.y - pixelDistance);
+};
+/**
+* Move diagonally down-left the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveDiagonal1DownLeft = function(pixelDistance) {
+	this.setX(this.x - pixelDistance);
+	this.setY(this.y + pixelDistance);
+};
+/**
+* Move diagonally down-right the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveDiagonal3DownRight = function(pixelDistance) {
+	this.setX(this.x + pixelDistance);
+	this.setY(this.y + pixelDistance);
+};
+/**
+* Move diagonally up-left the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveDiagonal7UpLeft = function(pixelDistance) {
+	this.setX(this.x - pixelDistance);
+	this.setY(this.y - pixelDistance);
+};
+/**
+* Move diagonally up-right the given distance.
+* @param {number} pixelDistance The distance in pixels.
+*/
+Game_CharacterBase.prototype.moveDiagonal9UpRight = function(pixelDistance) {
+	this.setX(this.x + pixelDistance);
+	this.setY(this.y - pixelDistance);
+};
+/**
+* Determines whether or not this character can pass in the given straight direction.
+* Substeps the probe at collision subgrid resolution to avoid skipping edges, then
+* uses your edge-subgrid checks per substep. Character AABB collisions are checked
+* only at the final landing point.
+*
+* @param {2|4|6|8} direction The cardinal direction being moved.
+* @param {number} distance The distance to move (in tiles, fractional).
+* @returns {boolean} True if movement is permitted this frame, false otherwise.
+*/
+Game_CharacterBase.prototype.canPassStraight = function(direction, distance = this.distancePerFrame()) {
+	const x0 = this.x;
+	const y0 = this.y;
+	if (this.isThrough() || this.isDebugThrough()) {
+		return true;
+	}
+	const subCount = this._pixelCollisionSubCount();
+	const radius = this.getEffectiveRadius();
+	const hitbox = this._pixelHitbox(radius);
+	const subStepSize = 1 / subCount;
+	let dx = 0;
+	let dy = 0;
+	if (direction === J.PIXEL.Directions.RIGHT) {
+		dx = 1;
+	} else if (direction === J.PIXEL.Directions.LEFT) {
+		dx = -1;
+	} else if (direction === J.PIXEL.Directions.DOWN) {
+		dy = 1;
+	} else if (direction === J.PIXEL.Directions.UP) {
+		dy = -1;
+	} else {
+		return false;
+	}
+	const maxStep = subStepSize;
+	const steps = Math.max(1, Math.ceil(distance / maxStep));
+	const stepSize = distance / steps;
+	let probeX = x0;
+	let probeY = y0;
+	for (let i = 0; i < steps; i++) {
+		const x1 = probeX + dx * stepSize;
+		const y1 = probeY + dy * stepSize;
+		if (dx !== 0) {
+			if (dx < 0) {
+				if (this._pixelCheckLeftPassage(probeX, probeY, x1, hitbox, subCount) === false) return false;
+				if (this._pixelCheckRightPassage(x1, probeY, probeX, hitbox, subCount) === false) return false;
+				if (this._pixelCheckVerticalAtNewXColumn(probeX, x1, probeY, hitbox, subCount) === false) return false;
+			} else {
+				if (this._pixelCheckRightPassage(probeX, probeY, x1, hitbox, subCount) === false) return false;
+				if (this._pixelCheckLeftPassage(x1, probeY, probeX, hitbox, subCount) === false) return false;
+				if (this._pixelCheckVerticalAtNewXColumn(probeX, x1, probeY, hitbox, subCount) === false) return false;
+			}
+		}
+		if (dy !== 0) {
+			if (dy < 0) {
+				if (this._pixelCheckUpPassage(probeX, probeY, y1, hitbox, subCount) === false) return false;
+				if (this._pixelCheckDownPassage(probeX, y1, probeY, hitbox, subCount) === false) return false;
+				if (this._pixelCheckHorizontalAtNewYRow(probeY, y1, probeX, hitbox, subCount) === false) return false;
+			} else {
+				if (this._pixelCheckDownPassage(probeX, probeY, y1, hitbox, subCount) === false) return false;
+				if (this._pixelCheckUpPassage(probeX, y1, probeY, hitbox, subCount) === false) return false;
+				if (this._pixelCheckHorizontalAtNewYRow(probeY, y1, probeX, hitbox, subCount) === false) return false;
+			}
+		}
+		probeX = x1;
+		probeY = y1;
+	}
+	if (this.isThrough() === false && this.isDebugThrough() === false && this.isOverlappingSolidTiles(probeX + this.getCollisionPivotX(), probeY + this.getCollisionPivotY(), radius)) {
+		return false;
+	}
+	const characterBlocked = this.isCharacterCollisionAt(probeX, probeY, radius);
+	return characterBlocked === false;
+};
+/**
+* Checks if the character's AABB at the given position would overlap any "solid wall" tiles.
+* A "solid wall" tile is defined here as out-of-bounds or a tile that is not passable in
+* any cardinal direction (2/4/6/8). This prevents slipping into impassable terrain corners
+* while allowing wall sliding that the edge-lane rule enables.
+* @param {number} px The proposed x center in tile units (fractional).
+* @param {number} py The proposed y center in tile units (fractional).
+* @param {number} radius The half-size of the square AABB in tiles.
+* @returns {boolean} True if any overlapped tile is solid, false otherwise.
+*/
+Game_CharacterBase.prototype.isOverlappingSolidTiles = function(px, py, radius) {
+	const eps = 1e-6;
+	const minCol = Math.floor(px - radius + eps);
+	const maxCol = Math.floor(px + radius - eps);
+	const minRow = Math.floor(py - radius + eps);
+	const maxRow = Math.floor(py + radius - eps);
+	for (let ty = minRow; ty <= maxRow; ty++) {
+		for (let tx = minCol; tx <= maxCol; tx++) {
+			if ($gameMap.isValid(tx, ty) === false) {
+				return true;
+			}
+			const anyPass = $gameMap.isPassable(tx, ty, J.PIXEL.Directions.DOWN) || $gameMap.isPassable(tx, ty, J.PIXEL.Directions.LEFT) || $gameMap.isPassable(tx, ty, J.PIXEL.Directions.RIGHT) || $gameMap.isPassable(tx, ty, J.PIXEL.Directions.UP);
+			if (anyPass === false) {
+				return true;
+			}
+		}
+	}
+	return false;
+};
+/**
+* Extends {@link Game_CharacterBase.canPass}.<br/>
+* Rounds fractional pixel coordinates to the nearest tile integer before delegating
+* to the tile-based passability check. With pixel movement, `_x`/`_y` are fractional;
+* the base RMMZ method uses them as array indices, so non-integer inputs produce
+* incorrect results without this normalization.
+* @param {number} x The x tile coordinate (may be fractional with pixel movement).
+* @param {number} y The y tile coordinate (may be fractional with pixel movement).
+* @param {2|4|6|8} d The direction to check passage toward.
+* @returns {boolean} Whether passage is allowed from the nearest tile in direction d.
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("canPass", Game_CharacterBase.prototype.canPass);
+Game_CharacterBase.prototype.canPass = function(x, y, d) {
+	return J.PIXEL.Aliased.Game_CharacterBase.get("canPass").call(this, Math.round(x), Math.round(y), d);
+};
+/**
+* Gets the x tile coordinate this character's body actually occupies.
+* Derives from the collision pivot so triggers, lookups, and collision all agree on a single
+* definition of "the tile I am on" — see {@link Game_CharacterBase#occupiedTileY} for why this
+* matters. The pivot is clamped below 1.0 because the JABS pixel extension anchors custom-hitbox
+* enemies at pivotY 1.0 ("feet on the tile's bottom edge"); unclamped, an at-rest enemy sitting on
+* an exact integer tile would report the tile below itself instead of its own.
+* @returns {number} The x tile coordinate containing this character's pivot.
+*/
+Game_CharacterBase.prototype.occupiedTileX = function() {
+	return Math.floor(this.x + Math.min(this.getCollisionPivotX(), 1 - 1e-6));
+};
+/**
+* Gets the y tile coordinate this character's body actually occupies.
+* Collision (`canPassStraight`, `isOverlappingSolidTiles`, etc.) decides where a character
+* physically stops using `floor(_y + getCollisionPivotY())` — the feet-anchored body tile. Event-
+* trigger lookups used to decide "which tile is this character on" via `Math.round(_y)` instead —
+* the logical-center tile. For any pivot other than 0.5 those two conventions disagree whenever
+* `frac(_y)` falls in `[1 - pivotY, 0.5)`, and pixel movement's feet-anchored physics parks
+* characters in that band constantly. This is the single authority both sides must use instead.
+* See {@link Game_CharacterBase#occupiedTileX} for the clamp rationale.
+* @returns {number} The y tile coordinate containing this character's pivot.
+*/
+Game_CharacterBase.prototype.occupiedTileY = function() {
+	return Math.floor(this.y + Math.min(this.getCollisionPivotY(), 1 - 1e-6));
+};
+/**
+* Overwrites {@link Game_CharacterBase.setPosition}.<br/>
+* Places a character at a continuous position instead of snapping its logical coordinates onto the
+* tile grid.
+*
+* Vanilla rounds `_x`/`_y` here because a tile-based character only ever stands on a whole tile, and
+* `_realX`/`_realY` are the pair that carry the in-between while a step animates. Pixel movement
+* inverts that relationship: `_x` is itself the continuous position, and every frame of movement
+* writes `_realX` to match it exactly. Rounding one of the pair and not the other therefore leaves
+* them disagreeing by up to half a tile with nothing still in flight to reconcile them, and nothing
+* closes the gap until the character walks far enough to be placed by movement again.
+*
+* A standing disagreement between the two is read as motion by anything measuring how far a
+* character travelled this frame, and as a body trailing its own sprite by anything drawing from the
+* collision pivot. Both are wrong the instant a character is placed anywhere other than a whole tile
+* - which under pixel movement is almost everywhere.
+* @param {number} x The x coordinate to place this character at, in tiles.
+* @param {number} y The y coordinate to place this character at, in tiles.
+*/
+Game_CharacterBase.prototype.setPosition = function(x, y) {
+	this.setX(x);
+	this.setY(y);
+	this.setRealX(x);
+	this.setRealY(y);
+};
+/**
+* Overwrites {@link Game_CharacterBase.pos}.<br/>
+* Compares against this character's occupied tile (the collision pivot's tile) rather than
+* vanilla's exact fractional equality or a naive round-to-nearest. Vanilla `pos` assumes integer
+* `_x`/`_y`, which pixel movement violates almost all the time; rounding alone "fixed" the
+* fractional-vs-integer mismatch but kept the wrong convention, disagreeing with the physics that
+* decide where a character's body actually stands whenever the collision pivot isn't 0.5. For
+* pivot-0.5 characters (vanilla defaults) this is identical to `Math.round`.
+* @param {number} x The x tile coordinate to compare against (expected to be an integer).
+* @param {number} y The y tile coordinate to compare against (expected to be an integer).
+* @returns {boolean} True if this character's occupied tile matches (x, y).
+*/
+Game_CharacterBase.prototype.pos = function(x, y) {
+	return this.occupiedTileX() === x && this.occupiedTileY() === y;
+};
+/**
+* Extends {@link Game_CharacterBase#regionId}.<br/>
+* Samples the map region at the character's collision pivot tile. With pixel movement,
+* `_x`/`_y` are fractional; vanilla forwards them into {@link Game_Map#tileId}, which
+* indexes `$dataMap.data` and returns wrong regions when coordinates are not integers.
+* @returns {number} The region id at the pivot tile.
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("regionId", Game_CharacterBase.prototype.regionId);
+Game_CharacterBase.prototype.regionId = function() {
+	const tileX = this.occupiedTileX();
+	const tileY = this.occupiedTileY();
+	return $gameMap.regionId(tileX, tileY);
+};
+/**
+* Moves straight in a given direction.
+* If there is an underlying diagonal direction, then move diagonally.
+* @param {number} direction The direction being moved.
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("moveStraight", Game_CharacterBase.prototype.moveStraight);
+Game_CharacterBase.prototype.moveStraight = function(direction) {
+	this.setMovementSuccess(this.canPassStraight(direction));
+	this.setDirection(direction);
+	if (this.isMovementSucceeded()) {
+		this.movePixelDistance(direction, this.distancePerFrame());
+	} else {
+		this.checkEventTriggerTouchFront(direction);
+	}
+};
+/**
+* Extends {@link Game_CharacterBase.moveDiagonally}.<br/>
+* Evaluates pixel-aware diagonal passability and executes pixel-distance movement.
+* Faces the vertical component (down/up) on a successful diagonal step rather than the raw
+* 8-dir composite code (1/3/7/9): {@link Sprite_Character#characterPatternY} only understands
+* cardinals 2/4/6/8 and produces a fractional, corrupted sprite-sheet row for anything else.
+* This mirrors the facing convention this plugin already uses for its other diagonal-movement
+* path in {@link Game_CharacterBase#pixelMoveByInput}'s `tryDiagonal` helper.
+* @param {4|6} horz The horizontal component direction (4=left, 6=right).
+* @param {2|8} vert The vertical component direction (2=down, 8=up).
+*/
+J.PIXEL.Aliased.Game_CharacterBase.set("moveDiagonally", Game_CharacterBase.prototype.moveDiagonally);
+Game_CharacterBase.prototype.moveDiagonally = function(horz, vert) {
+	this.setMovementSuccess(this.canPassDiagonally(this.x, this.y, horz, vert));
+	if (this.isMovementSucceeded()) {
+		const direction = this.directionFromHorzVert(horz, vert);
+		this.movePixelDistance(direction, this.diagonalDistancePerFrame());
+		this.setDirection(vert);
+	}
+	if (this.direction() === this.reverseDir(horz)) {
+		this.setDirection(horz);
+	}
+	if (this.direction() === this.reverseDir(vert)) {
+		this.setDirection(vert);
+	}
+};
+/**
+* Executes pixel movement in the given direction if possible.
+* This also returns the cardinal-normalized direction that should be faced.
+*
+* Notes:
+* - This version removes all “offset lane” probes. canPassStraight no longer
+*   accepts a perpendicular offset, so legacy offset-driven logic has been
+*   eliminated to prevent biased early/late decisions that felt like “+0.5”.
+* - Snapping is now epsilon-based around the orthogonal axis after a straight
+*   move to avoid jitter without over-snapping.
+* @param {2|4|6|8|1|3|7|9} direction The desired direction to be moved.
+* @returns {number} The cardinal-normalized direction to face while moving.
+*/
+Game_CharacterBase.prototype.pixelMoveByInput = function(direction) {
+	let innerDirection = direction;
+	const straightDistance = this.distancePerFrame();
+	const diagonalDistance = this.diagonalDistancePerFrame();
+	const canDown = () => this.canPassStraight(J.PIXEL.Directions.DOWN, straightDistance);
+	const canUp = () => this.canPassStraight(J.PIXEL.Directions.UP, straightDistance);
+	const canLeft = () => this.canPassStraight(J.PIXEL.Directions.LEFT, straightDistance);
+	const canRight = () => this.canPassStraight(J.PIXEL.Directions.RIGHT, straightDistance);
+	const roundX = Math.round(this.x);
+	const roundY = Math.round(this.y);
+	const SNAP_EPSILON = .1;
+	const tryDiagonal = (diagDir) => {
+		if (this.canPassDiagonalByDirection(diagDir) === false) {
+			return 0;
+		}
+		this.setMovementSuccess(true);
+		this.movePixelDistance(diagDir, diagonalDistance);
+		switch (diagDir) {
+			case J.PIXEL.Directions.LOWERLEFT:
+			case J.PIXEL.Directions.LOWERRIGHT: {
+				this.setDirection(J.PIXEL.Directions.DOWN);
+				return J.PIXEL.Directions.DOWN;
+			}
+			case J.PIXEL.Directions.UPPERLEFT:
+			case J.PIXEL.Directions.UPPERRIGHT: {
+				this.setDirection(J.PIXEL.Directions.UP);
+				return J.PIXEL.Directions.UP;
+			}
+		}
+	};
+	const diagonalFallback = (preferHorzDir, preferVertDir, chooseHorizontalPredicate) => {
+		if (chooseHorizontalPredicate()) {
+			return this.pixelMoveByInput(preferHorzDir);
+		} else {
+			return this.pixelMoveByInput(preferVertDir);
+		}
+	};
+	const recenterXAfterVertical = () => {
+		if (Math.abs(this.x - roundX) <= SNAP_EPSILON) {
+			this.setX(roundX);
+		}
+	};
+	const recenterYAfterHorizontal = () => {
+		if (Math.abs(this.y - roundY) <= SNAP_EPSILON) {
+			this.setY(roundY);
+		}
+	};
+	const doStraightMove = (cardinalDir) => {
+		this.setMovementSuccess(true);
+		this.movePixelDistance(cardinalDir, straightDistance);
+		switch (cardinalDir) {
+			case J.PIXEL.Directions.DOWN:
+			case J.PIXEL.Directions.UP: {
+				recenterXAfterVertical();
+				break;
+			}
+			case J.PIXEL.Directions.LEFT:
+			case J.PIXEL.Directions.RIGHT: {
+				recenterYAfterHorizontal();
+				break;
+			}
+		}
+		this.setDirection(cardinalDir);
+		return cardinalDir;
+	};
+	const handleDiagonal = (diagDir) => {
+		switch (diagDir) {
+			case J.PIXEL.Directions.LOWERLEFT: {
+				if (canLeft() && canDown()) {
+					const faced = tryDiagonal(J.PIXEL.Directions.LOWERLEFT);
+					if (faced > 0) return faced;
+					return diagonalFallback(J.PIXEL.Directions.LEFT, J.PIXEL.Directions.DOWN, () => this.x - roundX < roundY - this.y);
+				}
+				if (canLeft()) return this.pixelMoveByInput(J.PIXEL.Directions.LEFT);
+				if (canDown()) return this.pixelMoveByInput(J.PIXEL.Directions.DOWN);
+				innerDirection = J.PIXEL.Directions.DOWN;
+				return innerDirection;
+			}
+			case J.PIXEL.Directions.LOWERRIGHT: {
+				if (canRight() && canDown()) {
+					const faced = tryDiagonal(J.PIXEL.Directions.LOWERRIGHT);
+					if (faced > 0) return faced;
+					return diagonalFallback(J.PIXEL.Directions.RIGHT, J.PIXEL.Directions.DOWN, () => roundX - this.x < roundY - this.y);
+				}
+				if (canRight()) return this.pixelMoveByInput(J.PIXEL.Directions.RIGHT);
+				if (canDown()) return this.pixelMoveByInput(J.PIXEL.Directions.DOWN);
+				innerDirection = J.PIXEL.Directions.DOWN;
+				return innerDirection;
+			}
+			case J.PIXEL.Directions.UPPERLEFT: {
+				if (canLeft() && canUp()) {
+					const faced = tryDiagonal(J.PIXEL.Directions.UPPERLEFT);
+					if (faced > 0) return faced;
+					return diagonalFallback(J.PIXEL.Directions.LEFT, J.PIXEL.Directions.UP, () => this.x - roundX < this.y - roundY);
+				}
+				if (canLeft()) return this.pixelMoveByInput(J.PIXEL.Directions.LEFT);
+				if (canUp()) return this.pixelMoveByInput(J.PIXEL.Directions.UP);
+				innerDirection = J.PIXEL.Directions.UP;
+				return innerDirection;
+			}
+			case J.PIXEL.Directions.UPPERRIGHT: {
+				if (canRight() && canUp()) {
+					const faced = tryDiagonal(J.PIXEL.Directions.UPPERRIGHT);
+					if (faced > 0) return faced;
+					return diagonalFallback(J.PIXEL.Directions.RIGHT, J.PIXEL.Directions.UP, () => roundX - this.x < this.y - roundY);
+				}
+				if (canRight()) return this.pixelMoveByInput(J.PIXEL.Directions.RIGHT);
+				if (canUp()) return this.pixelMoveByInput(J.PIXEL.Directions.UP);
+				innerDirection = J.PIXEL.Directions.UP;
+				return innerDirection;
+			}
+		}
+	};
+	const tryWallSlide = (blockedDir) => {
+		const isHorizontal = blockedDir === J.PIXEL.Directions.LEFT || blockedDir === J.PIXEL.Directions.RIGHT;
+		const radius = this.getEffectiveRadius();
+		if (isHorizontal) {
+			const targetY = Math.round(this.y);
+			const residual = targetY - this.y;
+			if (Math.abs(residual) < .001) return 0;
+			const nudge = Math.sign(residual) * Math.min(Math.abs(residual), straightDistance);
+			const nudgedY = this.y + nudge;
+			if (this.isOverlappingSolidTiles(this.x + this.getCollisionPivotX(), nudgedY + this.getCollisionPivotY(), radius)) {
+				return 0;
+			}
+			this.setY(nudgedY);
+			this.setRealY(this.y);
+			if (this.canPassStraight(blockedDir, straightDistance)) {
+				return doStraightMove(blockedDir);
+			}
+			this.setMovedThisFrame(true);
+			return 0;
+		} else {
+			const targetX = Math.round(this.x);
+			const residual = targetX - this.x;
+			if (Math.abs(residual) < .001) return 0;
+			const nudge = Math.sign(residual) * Math.min(Math.abs(residual), straightDistance);
+			const nudgedX = this.x + nudge;
+			if (this.isOverlappingSolidTiles(nudgedX + this.getCollisionPivotX(), this.y + this.getCollisionPivotY(), radius)) {
+				return 0;
+			}
+			this.setX(nudgedX);
+			this.setRealX(this.x);
+			if (this.canPassStraight(blockedDir, straightDistance)) {
+				return doStraightMove(blockedDir);
+			}
+			this.setMovedThisFrame(true);
+			return 0;
+		}
+	};
+	const handleStraight = (cardinalDir) => {
+		switch (cardinalDir) {
+			case J.PIXEL.Directions.DOWN: {
+				if (canDown()) return doStraightMove(J.PIXEL.Directions.DOWN);
+				return tryWallSlide(J.PIXEL.Directions.DOWN);
+			}
+			case J.PIXEL.Directions.UP: {
+				if (canUp()) return doStraightMove(J.PIXEL.Directions.UP);
+				return tryWallSlide(J.PIXEL.Directions.UP);
+			}
+			case J.PIXEL.Directions.LEFT: {
+				if (canLeft()) return doStraightMove(J.PIXEL.Directions.LEFT);
+				return tryWallSlide(J.PIXEL.Directions.LEFT);
+			}
+			case J.PIXEL.Directions.RIGHT: {
+				if (canRight()) return doStraightMove(J.PIXEL.Directions.RIGHT);
+				return tryWallSlide(J.PIXEL.Directions.RIGHT);
+			}
+		}
+	};
+	if (this.isDiagonalDirection(direction)) {
+		return handleDiagonal(direction);
+	}
+	const faced = handleStraight(direction);
+	if (faced > 0) return faced;
+	return innerDirection;
+};
+/**
+* Overwrites {@link Game_CharacterBase.canPassDiagonally} with Cyclone-like semantics.
+* Requires both legs at current, re-validates at new X and at new Y, validates reverse
+* at destination, and rejects if a character occupies the diagonal landing point.
+* @param {number} x The current x.
+* @param {number} y The current y.
+* @param {4|6} horz The horizontal leg.
+* @param {2|8} vert The vertical leg.
+* @returns {boolean} True if diagonal is permitted.
+*/
+Game_CharacterBase.prototype.canPassDiagonally = function(x, y, horz, vert) {
+	const oldX = this.x;
+	const oldY = this.y;
+	this.setX(x);
+	this.setY(y);
+	if (this.isThrough() || this.isDebugThrough()) {
+		this.setX(oldX);
+		this.setY(oldY);
+		return true;
+	}
+	const straightStep = this.distancePerFrame();
+	const diagStep = this.diagonalDistancePerFrame();
+	const radius = this.getEffectiveRadius();
+	const hitbox = this._pixelHitbox(radius);
+	const subCount = this._pixelCollisionSubCount();
+	let nx = this.x;
+	let ny = this.y;
+	if (horz === J.PIXEL.Directions.RIGHT) {
+		nx = this.x + diagStep;
+	} else {
+		nx = this.x - diagStep;
+	}
+	if (vert === J.PIXEL.Directions.DOWN) {
+		ny = this.y + diagStep;
+	} else {
+		ny = this.y - diagStep;
+	}
+	if ($gameMap.isValid(nx, ny) === false) {
+		this.setX(oldX);
+		this.setY(oldY);
+		return false;
+	}
+	if (horz === J.PIXEL.Directions.LEFT) {
+		if (this._pixelCheckLeftPassage(this.x, this.y, this.x - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckRightPassage(this.x, this.y, this.x + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	if (vert === J.PIXEL.Directions.UP) {
+		if (this._pixelCheckUpPassage(this.x, this.y, this.y - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckDownPassage(this.x, this.y, this.y + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	let y2 = this.y;
+	if (vert === J.PIXEL.Directions.DOWN) {
+		y2 = this.y + straightStep;
+	} else {
+		y2 = this.y - straightStep;
+	}
+	if (horz === J.PIXEL.Directions.LEFT) {
+		if (this._pixelCheckLeftPassage(this.x, y2, this.x - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckRightPassage(this.x, y2, this.x + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	let x2 = this.x;
+	if (horz === J.PIXEL.Directions.RIGHT) {
+		x2 = this.x + straightStep;
+	} else {
+		x2 = this.x - straightStep;
+	}
+	if (vert === J.PIXEL.Directions.UP) {
+		if (this._pixelCheckUpPassage(x2, this.y, this.y - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckDownPassage(x2, this.y, this.y + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	if (horz === J.PIXEL.Directions.LEFT) {
+		if (this._pixelCheckRightPassage(nx, ny, nx + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckLeftPassage(nx, ny, nx - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	if (vert === J.PIXEL.Directions.UP) {
+		if (this._pixelCheckDownPassage(nx, ny, ny + straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	} else {
+		if (this._pixelCheckUpPassage(nx, ny, ny - straightStep, hitbox, subCount) === false) {
+			this.setX(oldX);
+			this.setY(oldY);
+			return false;
+		}
+	}
+	const blocked = this.isCharacterCollisionAt(nx, ny, radius);
+	this.setX(oldX);
+	this.setY(oldY);
+	return blocked === false;
+};
+/**
+* Determines whether or not a diagonal by its 8-dir code is passable for the next frame.
+* Requires both component straight legs to be passable using the tile-centered straight check,
+* then rejects if a character-vs-character AABB would collide at the diagonal landing point.
+* No lateral offset columns or lane sampling.
+* @param {1|3|7|9} diagonalDir The diagonal direction (1,3,7,9).
+* @param {number=} straightDistance Optional straight distance per frame to probe with.
+* @returns {boolean} True if the diagonal can be taken this frame, false otherwise.
+*/
+Game_CharacterBase.prototype.canPassDiagonalByDirection = function(diagonalDir, straightDistance = this.distancePerFrame()) {
+	const canDown = () => this.canPassStraight(J.PIXEL.Directions.DOWN, straightDistance);
+	const canUp = () => this.canPassStraight(J.PIXEL.Directions.UP, straightDistance);
+	const canLeft = () => this.canPassStraight(J.PIXEL.Directions.LEFT, straightDistance);
+	const canRight = () => this.canPassStraight(J.PIXEL.Directions.RIGHT, straightDistance);
+	let legsOk = false;
+	if (diagonalDir === J.PIXEL.Directions.LOWERLEFT) legsOk = canLeft() && canDown();
+	if (diagonalDir === J.PIXEL.Directions.LOWERRIGHT) legsOk = canRight() && canDown();
+	if (diagonalDir === J.PIXEL.Directions.UPPERLEFT) legsOk = canLeft() && canUp();
+	if (diagonalDir === J.PIXEL.Directions.UPPERRIGHT) legsOk = canRight() && canUp();
+	if (legsOk === false) return false;
+	const step = this.diagonalDistancePerFrame();
+	let nx = this.x;
+	let ny = this.y;
+	if (diagonalDir === J.PIXEL.Directions.LOWERLEFT) {
+		nx -= step;
+		ny += step;
+	}
+	if (diagonalDir === J.PIXEL.Directions.LOWERRIGHT) {
+		nx += step;
+		ny += step;
+	}
+	if (diagonalDir === J.PIXEL.Directions.UPPERLEFT) {
+		nx -= step;
+		ny -= step;
+	}
+	if (diagonalDir === J.PIXEL.Directions.UPPERRIGHT) {
+		nx += step;
+		ny -= step;
+	}
+	const radius = this.getEffectiveRadius();
+	return this.isCharacterCollisionAt(nx, ny, radius) === false;
+};
+/**
+* Checks for a collision against other solid characters at a fractional point.
+* Uses simple AABB (square) overlap in tile space for stable, flat boundaries.
+* Party members (player and followers) never block each other.
+* Only events with normal priority ("Same as characters") are considered blockers.
+* @param {number} px Proposed x (fractional tiles).
+* @param {number} py Proposed y (fractional tiles).
+* @param {number=} radius Optional collision half-size in tiles (default 0.35).
+* @returns {boolean} True if any solid character would collide at (px, py).
+*/
+Game_CharacterBase.prototype.isCharacterCollisionAt = function(px, py, radius = .35) {
+	const selfAabb = this.getCollisionAabbAt(px, py, radius);
+	return this.getCollisionCandidates().some((candidate) => {
+		if (J.ABS && candidate.isJabsAction()) return false;
+		const candidateAabb = candidate.getCollisionAabbAt(candidate.x, candidate.y, candidate.getEffectiveRadius());
+		return collisionAabbsOverlap(selfAabb, candidateAabb);
+	});
+};
+/**
+* Collects every character that could block this one from moving.
+* Party members never block each other, so they only count when the mover is an outsider.
+* @returns {Game_CharacterBase[]} The characters worth testing for overlap.
+*/
+Game_CharacterBase.prototype.getCollisionCandidates = function() {
+	const player = $gamePlayer;
+	const followers = player._followers._data;
+	const selfIsParty = [player].concat(followers).includes(this);
+	const candidates = $gameMap.events().filter((event) => {
+		if (event === this) return false;
+		if (event.isErased()) return false;
+		if (event.isThrough()) return false;
+		if (event.isNormalPriority() === false) return false;
+		if (J.ABS && event.isJabsAction()) return false;
+		return true;
+	});
+	if (selfIsParty) return candidates;
+	if (player.isThrough() === false) {
+		candidates.push(player);
+	}
+	followers.forEach((follower) => {
+		if (follower.isThrough()) return;
+		candidates.push(follower);
+	});
+	return candidates;
+};
+/**
+* Builds this character's collision footprint in tile space at a proposed position.
+* Anchored on this character's own pivot and shaped by its own hitbox, so feet-anchored and
+* rectangular hitboxes are measured correctly rather than as a square around the logical coordinate.
+* @param {number} logicalX The x coordinate to measure from, in fractional tiles.
+* @param {number} logicalY The y coordinate to measure from, in fractional tiles.
+* @param {number} halfRadius The compatibility radius for square footprints.
+* @returns {{left: number, top: number, right: number, bottom: number, width: number, height: number}}
+*/
+Game_CharacterBase.prototype.getCollisionAabbAt = function(logicalX, logicalY, halfRadius) {
+	const pivotX = logicalX + this.getCollisionPivotX();
+	const pivotY = logicalY + this.getCollisionPivotY();
+	const hitbox = this._pixelHitbox(halfRadius);
+	const left = pivotX + hitbox.hx;
+	const top = pivotY + hitbox.hy;
+	return {
+		left,
+		top,
+		right: left + hitbox.w,
+		bottom: top + hitbox.h,
+		width: hitbox.w,
+		height: hitbox.h
+	};
+};
+/**
+* Determines whether two tile-space collision footprints overlap.
+* Edge-touching is not overlap, matching the legacy scalar logic.
+* @param {{left: number, top: number, right: number, bottom: number}} a The first footprint.
+* @param {{left: number, top: number, right: number, bottom: number}} b The second footprint.
+* @returns {boolean} True if the two footprints share any area.
+*/
+function collisionAabbsOverlap(a, b) {
+	return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+/**
+* Gets the collision radius for this character in tile units.
+* This radius is used for pixel-accurate character-vs-character collision checks.
+* @returns {number} The collision radius in tiles.
+*/
+Game_CharacterBase.prototype.getCollisionRadius = function() {
+	return .3;
+};
+/**
+* Gets the effective collision radius, clamped so the hitbox never extends past the
+* tile boundary below the character. Enforces the invariant:
+*   pivotY + effectiveRadius < 1.0
+* This prevents the hitbox from bleeding into the tile below, which would cause false
+* solid-overlap detections against deny-region tiles and similar boundary conditions.
+* @returns {number} The clamped collision radius in tile units.
+*/
+Game_CharacterBase.prototype.getEffectiveRadius = function() {
+	const maxRadius = 1 - this.getCollisionPivotY() - 1e-6;
+	return Math.min(this.getCollisionRadius(), maxRadius);
+};
+/**
+* Gets the collision pivot X in tile units for this character.
+* The pivot offsets the hitbox center from the character's logical `_x` coordinate.
+* A value of 0.5 places the hitbox at the horizontal center of the sprite tile.
+* @returns {number} The X pivot offset in tile units.
+*/
+Game_CharacterBase.prototype.getCollisionPivotX = function() {
+	return .5;
+};
+/**
+* Gets the collision pivot Y in tile units for this character.
+* The pivot offsets the hitbox center from the character's logical `_y` coordinate.
+* A value of 0.5 centers the hitbox on the character's tile, giving symmetric collision
+* margins on all four sides and eliminating the half-tile early-block from below/right.
+* @returns {number} The Y pivot offset in tile units.
+*/
+Game_CharacterBase.prototype.getCollisionPivotY = function() {
+	return .5;
+};
+/**
+* Computes a square hitbox derived from the configured collision radius.
+* The hitbox is centered on the collision pivot on both axes, matching the player’s
+* visual center to eliminate perceived half-tile skew.
+* @param {number} radius The collision half-size in tiles.
+* @returns {{w:number,h:number,hx:number,hy:number}}
+*/
+Game_CharacterBase.prototype._pixelHitbox = function(radius) {
+	const half = radius;
+	const width = half * 2;
+	const height = half * 2;
+	return {
+		w: width,
+		h: height,
+		hx: -half,
+		hy: -half
+	};
+};
+/**
+* Returns the collision subgrid resolution from the plugin metadata.
+* @returns {number} The collision subgrid count.
+*/
+Game_CharacterBase.prototype._pixelCollisionSubCount = function() {
+	if (PIXEL_CollisionManager.collisionStepCount === undefined) {
+		PIXEL_CollisionManager.initConfig();
+	}
+	return PIXEL_CollisionManager.collisionStepCount;
+};
+/**
+* Determines passability at a fractional subcell against the PIXEL collision table.
+* Expects coordinates already in the collision-table’s integer-aligned space
+* (seam-aligned), which are produced by the first/last collision helpers.
+* @param {number} px The fractional x at the sampled subcell (tile units).
+* @param {number} py The fractional y at the sampled subcell (tile units).
+* @param {2|4|6|8} d The direction to test (entering direction).
+* @returns {boolean} True if passable, false otherwise.
+*/
+Game_CharacterBase.prototype._pixelIsPositionPassable = function(px, py, d) {
+	return PIXEL_CollisionManager.isPositionPassable(px, py, d);
+};
+/**
+* Returns 180-degree reverse of a 4-dir direction.
+* @param {2|4|6|8} d The direction.
+* @returns {2|4|6|8} The reverse direction.
+*/
+Game_CharacterBase.prototype._pixelReverseDir = function(d) {
+	if (d === 2) return 8;
+	if (d === 8) return 2;
+	if (d === 4) return 6;
+	if (d === 6) return 4;
+	return d;
+};
+/**
+* First collision X for hitbox at center x with subgrid count.
+* Uses an inward-biased floor to pick the first overlapped subcolumn.
+* Applies the per-character pivot for alignment.
+* @param {number} x The character’s tile x.
+* @param {{hx:number,w:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {number} First subcell x.
+*/
+Game_CharacterBase.prototype._pixelFirstCollisionXAt = function(x, hb, count) {
+	const px = x + this.getCollisionPivotX();
+	const raw = (px + hb.hx) * count;
+	const eps = 1e-7;
+	return Math.floor(raw + eps) / count;
+};
+/**
+* Last collision X for hitbox at center x with subgrid count.
+* Uses an inward-biased floor on the right edge minus epsilon to include the last overlapped subcolumn.
+* Applies the per-character pivot for alignment.
+* @param {number} x The character’s tile x.
+* @param {{hx:number,w:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {number} Last subcell x.
+*/
+Game_CharacterBase.prototype._pixelLastCollisionXAt = function(x, hb, count) {
+	const px = x + this.getCollisionPivotX();
+	const raw = (px + hb.hx + hb.w) * count;
+	const eps = 1e-7;
+	return Math.floor(raw - eps) / count;
+};
+/**
+* First collision Y for hitbox at center y with subgrid count.
+* Uses an inward-biased floor to pick the first overlapped subrow.
+* Applies the per-character pivot for alignment.
+* @param {number} y The character’s tile y.
+* @param {{hy:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {number} First subcell y.
+*/
+Game_CharacterBase.prototype._pixelFirstCollisionYAt = function(y, hb, count) {
+	const py = y + this.getCollisionPivotY();
+	const raw = (py + hb.hy) * count;
+	const eps = 1e-7;
+	return Math.floor(raw + eps) / count;
+};
+/**
+* Last collision Y for hitbox at center y with subgrid count.
+* Uses an inward-biased floor on the bottom edge minus epsilon to include the last overlapped subrow.
+* Applies the per-character pivot for alignment.
+* @param {number} y The character’s tile y.
+* @param {{hy:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {number} Last subcell y.
+*/
+Game_CharacterBase.prototype._pixelLastCollisionYAt = function(y, hb, count) {
+	const py = y + this.getCollisionPivotY();
+	const raw = (py + hb.hy + hb.h) * count;
+	const eps = 1e-7;
+	return Math.floor(raw - eps) / count;
+};
+/**
+* Checks leftward passage from current center at y across edge subcells.
+* Uses integer subcell indices to detect true seam crossings and sample spans.
+* @param {number} x Current center x.
+* @param {number} y Current center y.
+* @param {number} xDest Destination center x.
+* @param {{hx:number,hy:number,w:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {boolean} True if passage allowed.
+*/
+Game_CharacterBase.prototype._pixelCheckLeftPassage = function(x, y, xDest, hb, count) {
+	const px0 = x + this.getCollisionPivotX();
+	const px1 = xDest + this.getCollisionPivotX();
+	const py = y + this.getCollisionPivotY();
+	const eps = 1e-7;
+	const curLeftIdx = Math.floor((px0 + hb.hx) * count + eps);
+	const destLeftIdx = Math.floor((px1 + hb.hx) * count + eps);
+	const crossed = destLeftIdx === curLeftIdx - 1;
+	if (crossed === false) {
+		return true;
+	}
+	const firstRowIdx = Math.floor((py + hb.hy) * count + eps);
+	const lastRowIdx = Math.floor((py + hb.hy + hb.h) * count - eps);
+	const curColX = curLeftIdx / count;
+	const destColX = destLeftIdx / count;
+	for (let row = firstRowIdx; row <= lastRowIdx; row++) {
+		const ny = row / count;
+		PixelDebugSampler.push(curColX, ny, "rgba(255, 255, 0, 0.6)");
+		PixelDebugSampler.push(destColX, ny, "rgba(0, 255, 255, 0.6)");
+		if (this._pixelIsPositionPassable(curColX, ny, J.PIXEL.Directions.LEFT) === false) return false;
+		if (this._pixelIsPositionPassable(destColX, ny, J.PIXEL.Directions.RIGHT) === false) return false;
+	}
+	return true;
+};
+/**
+* Checks rightward passage across edge subcells using integer indices.
+* Validates current-right vs destination-left along all overlapped rows.
+* @param {number} x Current center x.
+* @param {number} y Current center y.
+* @param {number} xDest Destination center x.
+* @param {{hx:number,hy:number,w:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {boolean} True if passage allowed.
+*/
+Game_CharacterBase.prototype._pixelCheckRightPassage = function(x, y, xDest, hb, count) {
+	const px0 = x + this.getCollisionPivotX();
+	const px1 = xDest + this.getCollisionPivotX();
+	const py = y + this.getCollisionPivotY();
+	const eps = 1e-7;
+	const curRightIdx = Math.floor((px0 + hb.hx + hb.w) * count - eps);
+	const destRightIdx = Math.floor((px1 + hb.hx + hb.w) * count + eps);
+	const crossed = destRightIdx === curRightIdx + 1;
+	if (crossed === false) {
+		return true;
+	}
+	const firstRowIdx = Math.floor((py + hb.hy) * count + eps);
+	const lastRowIdx = Math.floor((py + hb.hy + hb.h) * count - eps);
+	const curColX = curRightIdx / count;
+	const destColX = destRightIdx / count;
+	for (let row = firstRowIdx; row <= lastRowIdx; row++) {
+		const ny = row / count;
+		PixelDebugSampler.push(curColX, ny, "rgba(255, 255, 0, 0.6)");
+		PixelDebugSampler.push(destColX, ny, "rgba(0, 255, 255, 0.6)");
+		if (this._pixelIsPositionPassable(curColX, ny, J.PIXEL.Directions.RIGHT) === false) return false;
+		if (this._pixelIsPositionPassable(destColX, ny, J.PIXEL.Directions.LEFT) === false) return false;
+	}
+	return true;
+};
+/**
+* Checks upward passage across edge subcells using integer indices.
+* Validates current-top vs destination-bottom along all overlapped columns.
+* @param {number} x Current center x.
+* @param {number} y Current center y.
+* @param {number} yDest Destination center y.
+* @param {{hx:number,hy:number,w:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {boolean} True if passage allowed.
+*/
+Game_CharacterBase.prototype._pixelCheckUpPassage = function(x, y, yDest, hb, count) {
+	const py0 = y + this.getCollisionPivotY();
+	const py1 = yDest + this.getCollisionPivotY();
+	const px = x + this.getCollisionPivotX();
+	const eps = 1e-7;
+	const curTopIdx = Math.floor((py0 + hb.hy) * count + eps);
+	const destTopIdx = Math.floor((py1 + hb.hy) * count + eps);
+	const crossed = destTopIdx === curTopIdx - 1;
+	if (crossed === false) {
+		return true;
+	}
+	const firstColIdx = Math.floor((px + hb.hx) * count + eps);
+	const lastColIdx = Math.floor((px + hb.hx + hb.w) * count - eps);
+	const curRowY = curTopIdx / count;
+	const destRowY = destTopIdx / count;
+	for (let col = firstColIdx; col <= lastColIdx; col++) {
+		const nx = col / count;
+		PixelDebugSampler.push(nx, curRowY, "rgba(255, 255, 0, 0.6)");
+		PixelDebugSampler.push(nx, destRowY, "rgba(0, 255, 255, 0.6)");
+		if (this._pixelIsPositionPassable(nx, curRowY, J.PIXEL.Directions.UP) === false) return false;
+		if (this._pixelIsPositionPassable(nx, destRowY, J.PIXEL.Directions.DOWN) === false) return false;
+	}
+	return true;
+};
+/**
+* Checks downward passage across edge subcells using integer indices.
+* Validates current-bottom vs destination-top along all overlapped columns.
+* @param {number} x Current center x.
+* @param {number} y Current center y.
+* @param {number} yDest Destination center y.
+* @param {{hx:number,hy:number,w:number,h:number}} hb Hitbox.
+* @param {number} count Subgrid count.
+* @returns {boolean} True if passage allowed.
+*/
+Game_CharacterBase.prototype._pixelCheckDownPassage = function(x, y, yDest, hb, count) {
+	const py0 = y + this.getCollisionPivotY();
+	const py1 = yDest + this.getCollisionPivotY();
+	const px = x + this.getCollisionPivotX();
+	const eps = 1e-7;
+	const curBottomIdx = Math.floor((py0 + hb.hy + hb.h) * count - eps);
+	const destBottomIdx = Math.floor((py1 + hb.hy + hb.h) * count + eps);
+	const crossed = destBottomIdx === curBottomIdx + 1;
+	if (crossed === false) {
+		return true;
+	}
+	const firstColIdx = Math.floor((px + hb.hx) * count + eps);
+	const lastColIdx = Math.floor((px + hb.hx + hb.w) * count - eps);
+	const curRowY = curBottomIdx / count;
+	const destRowY = destBottomIdx / count;
+	for (let col = firstColIdx; col <= lastColIdx; col++) {
+		const nx = col / count;
+		PixelDebugSampler.push(nx, curRowY, "rgba(255, 255, 0, 0.6)");
+		PixelDebugSampler.push(nx, destRowY, "rgba(0, 255, 255, 0.6)");
+		if (this._pixelIsPositionPassable(nx, curRowY, J.PIXEL.Directions.DOWN) === false) return false;
+		if (this._pixelIsPositionPassable(nx, destRowY, J.PIXEL.Directions.UP) === false) return false;
+	}
+	return true;
+};
+/**
+* Validates vertical lanes (up/down) at the specific new X-edge column we are entering.
+* Now uses integer column indices and runs only when a seam was truly crossed.
+* @param {number} xCurrent The current center x before the step.
+* @param {number} xDest The destination center x after the step.
+* @param {number} y The current center y (for edge sampling across vertical lanes).
+* @param {{hx:number,hy:number,w:number,h:number}} hb The hitbox metrics.
+* @param {number} count The collision subgrid count.
+* @returns {boolean} True if lanes ok.
+*/
+Game_CharacterBase.prototype._pixelCheckVerticalAtNewXColumn = function(xCurrent, xDest, y, hb, count) {
+	if (xDest === xCurrent) return true;
+	const px0 = xCurrent + this.getCollisionPivotX();
+	const px1 = xDest + this.getCollisionPivotX();
+	const py = y + this.getCollisionPivotY();
+	const eps = 1e-7;
+	const curRightIdx = Math.floor((px0 + hb.hx + hb.w) * count - eps);
+	const curLeftIdx = Math.floor((px0 + hb.hx) * count + eps);
+	const destLeftIdx = Math.floor((px1 + hb.hx) * count + eps);
+	const destRightIdx = Math.floor((px1 + hb.hx + hb.w) * count - eps);
+	const movingRight = xDest > xCurrent;
+	const crossed = movingRight ? destLeftIdx === curRightIdx + 1 : destRightIdx === curLeftIdx - 1;
+	if (crossed === false) return true;
+	const columnIdx = movingRight ? destLeftIdx : destRightIdx;
+	const columnX = columnIdx / count;
+	const firstRowIdx = Math.floor((py + hb.hy) * count + eps);
+	const lastRowIdx = Math.floor((py + hb.hy + hb.h) * count - eps);
+	for (let row = firstRowIdx; row <= lastRowIdx; row++) {
+		const ny = row / count;
+		PixelDebugSampler.push(columnX, ny, "rgba(0, 128, 255, 0.6)");
+		const upOk = this._pixelIsPositionPassable(columnX, ny, J.PIXEL.Directions.UP);
+		const downOk = this._pixelIsPositionPassable(columnX, ny, J.PIXEL.Directions.DOWN);
+		if (upOk === false && downOk === false) return false;
+	}
+	return true;
+};
+/**
+* Validates horizontal lanes (left/right) at the specific new Y-edge row we are entering.
+* Now uses integer row indices and runs only when a seam was truly crossed.
+* @param {number} yCurrent The current center y before the step.
+* @param {number} yDest The destination center y after the step.
+* @param {number} x The current center x (for edge sampling across horizontal lanes).
+* @param {{hx:number,hy:number,w:number,h:number}} hb The hitbox metrics.
+* @param {number} count The collision subgrid count.
+* @returns {boolean} True if lanes ok.
+*/
+Game_CharacterBase.prototype._pixelCheckHorizontalAtNewYRow = function(yCurrent, yDest, x, hb, count) {
+	if (yDest === yCurrent) return true;
+	const py0 = yCurrent + this.getCollisionPivotY();
+	const py1 = yDest + this.getCollisionPivotY();
+	const px = x + this.getCollisionPivotX();
+	const eps = 1e-7;
+	const curBottomIdx = Math.floor((py0 + hb.hy + hb.h) * count - eps);
+	const curTopIdx = Math.floor((py0 + hb.hy) * count + eps);
+	const destTopIdx = Math.floor((py1 + hb.hy) * count + eps);
+	const destBottomIdx = Math.floor((py1 + hb.hy + hb.h) * count - eps);
+	const movingDown = yDest > yCurrent;
+	const crossed = movingDown ? destTopIdx === curBottomIdx + 1 : destBottomIdx === curTopIdx - 1;
+	if (crossed === false) return true;
+	const rowIdx = movingDown ? destTopIdx : destBottomIdx;
+	const rowY = rowIdx / count;
+	const firstColIdx = Math.floor((px + hb.hx) * count + eps);
+	const lastColIdx = Math.floor((px + hb.hx + hb.w) * count - eps);
+	for (let col = firstColIdx; col <= lastColIdx; col++) {
+		const nx = col / count;
+		PixelDebugSampler.push(nx, rowY, "rgba(0, 128, 255, 0.6)");
+		const leftOk = this._pixelIsPositionPassable(nx, rowY, J.PIXEL.Directions.LEFT);
+		const rightOk = this._pixelIsPositionPassable(nx, rowY, J.PIXEL.Directions.RIGHT);
+		if (leftOk === false && rightOk === false) return false;
+	}
+	return true;
+};
+/**
+* Moves this character at an arbitrary angle in degrees.
+* The angle follows the RMMZ map convention: 0° = right, 90° = down, 180° = left, 270° = up.
+* Movement is blocked if pixel collision prevents passage in the chosen direction. Fires touch-
+* front triggers on contact with either blocked axis, even while wall-sliding continues
+* successfully along the other axis - see the wall-sliding comment inline for why "moved
+* successfully via sliding" and "touched a blocked axis" are independent outcomes, not mutually
+* exclusive ones.
+* @param {number} angleDegrees The angle in degrees (0–360, clockwise from right).
+* @param {number=} speed The movement speed in tile units; defaults to distancePerFrame.
+* @returns {boolean} True if the character moved, false if blocked.
+*/
+Game_CharacterBase.prototype.vectorMoveByAngle = function(angleDegrees, speed = this.distancePerFrame()) {
+	const radians = angleDegrees * Math.PI / 180;
+	const noiseEpsilon = 1e-9;
+	let dx = Math.cos(radians) * speed;
+	let dy = Math.sin(radians) * speed;
+	if (Math.abs(dx) < noiseEpsilon) dx = 0;
+	if (Math.abs(dy) < noiseEpsilon) dy = 0;
+	const prevX = this.x;
+	const prevY = this.y;
+	const radius = this.getEffectiveRadius();
+	let horzDir = 0;
+	if (dx > 0) {
+		horzDir = J.PIXEL.Directions.RIGHT;
+	} else if (dx < 0) {
+		horzDir = J.PIXEL.Directions.LEFT;
+	}
+	let vertDir = 0;
+	if (dy > 0) {
+		vertDir = J.PIXEL.Directions.DOWN;
+	} else if (dy < 0) {
+		vertDir = J.PIXEL.Directions.UP;
+	}
+	let canMoveX = dx === 0;
+	if (dx !== 0) {
+		canMoveX = this.canPassStraight(horzDir, Math.abs(dx));
+	}
+	let canMoveY = dy === 0;
+	if (dy !== 0) {
+		canMoveY = this.canPassStraight(vertDir, Math.abs(dy));
+	}
+	const finalDx = canMoveX ? dx : 0;
+	const finalDy = canMoveY ? dy : 0;
+	if (finalDx === 0 && finalDy === 0) {
+		return false;
+	}
+	if (dx !== 0 && canMoveX === false) {
+		this.setDirection(horzDir);
+		this.checkEventTriggerTouchFront(horzDir);
+	}
+	if (dy !== 0 && canMoveY === false) {
+		this.setDirection(vertDir);
+		this.checkEventTriggerTouchFront(vertDir);
+	}
+	this.setX(this.x + finalDx);
+	this.setY(this.y + finalDy);
+	if (this.isThrough() === false && this.isDebugThrough() === false && this.isOverlappingSolidTiles(this.x + this.getCollisionPivotX(), this.y + this.getCollisionPivotY(), radius)) {
+		this.setX(prevX);
+		this.setY(prevY);
+		this.setRealX(this.x);
+		this.setRealY(this.y);
+		return false;
+	}
+	this.setMovedThisFrame(true);
+	this.setRealX(this.x);
+	this.setRealY(this.y);
+	this.modMoveDistance(speed);
+	this.updatePixelStepping();
+	this.setDirection(this.angleToNearestDirection(angleDegrees));
+	return true;
+};
+/**
+* Converts an angle in degrees to the nearest 4-direction code for sprite facing.
+* Uses cardinal-only snapping since RMMZ sprites only have 4 facing directions.
+* @param {number} angleDegrees The angle in degrees (0° = right, 90° = down).
+* @returns {2|4|6|8} The nearest cardinal direction code.
+*/
+Game_CharacterBase.prototype.angleToNearestDirection = function(angleDegrees) {
+	const normalized = (angleDegrees % 360 + 360) % 360;
+	if (normalized >= 315 || normalized < 45) {
+		return J.PIXEL.Directions.RIGHT;
+	}
+	if (normalized >= 45 && normalized < 135) {
+		return J.PIXEL.Directions.DOWN;
+	}
+	if (normalized >= 135 && normalized < 225) {
+		return J.PIXEL.Directions.LEFT;
+	}
+	return J.PIXEL.Directions.UP;
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Event.js
+/**
+* Extends {@link Game_Event.initMembers}.<br/>
+* Also seeds the area this event covers, which starts as its own tile and nothing more.
+*/
+J.PIXEL.Aliased.Game_Event.set("initMembers", Game_Event.prototype.initMembers);
+Game_Event.prototype.initMembers = function() {
+	J.PIXEL.Aliased.Game_Event.get("initMembers").call(this);
+	this.initAreaEventMembers();
+};
+/**
+* Initializes the members describing the area this event's active page covers.<br/>
+* None of it is ever saved: everything on an event's `_j` is map-session state, rebuilt with the event
+* at the next map setup, and every page re-reads its own area when it becomes active anyway.
+*/
+Game_Event.prototype.initAreaEventMembers = function() {
+	/**
+	* How many tiles wide the area this event's active page covers, counted rightward from the tile
+	* the event stands on.
+	* @type {number}
+	*/
+	this._j._pixel._areaEventWidth = 1;
+	/**
+	* How many tiles high the area this event's active page covers, counted downward from the tile the
+	* event stands on.
+	* @type {number}
+	*/
+	this._j._pixel._areaEventHeight = 1;
+	/**
+	* Whether a transfer from this event's active page lands as far along its destination as the player
+	* stood along the page's area.
+	* @type {boolean}
+	*/
+	this._j._pixel._relativeTransfer = false;
+};
+/**
+* Gets how many tiles wide the area this event's active page covers.
+* @returns {number} The width, in tiles.
+*/
+Game_Event.prototype.areaEventWidth = function() {
+	return this._j._pixel._areaEventWidth;
+};
+/**
+* Sets how many tiles wide the area this event's active page covers.
+* @param {number} areaEventWidth The width, in tiles.
+*/
+Game_Event.prototype.setAreaEventWidth = function(areaEventWidth) {
+	this._j._pixel._areaEventWidth = areaEventWidth;
+};
+/**
+* Gets how many tiles high the area this event's active page covers.
+* @returns {number} The height, in tiles.
+*/
+Game_Event.prototype.areaEventHeight = function() {
+	return this._j._pixel._areaEventHeight;
+};
+/**
+* Sets how many tiles high the area this event's active page covers.
+* @param {number} areaEventHeight The height, in tiles.
+*/
+Game_Event.prototype.setAreaEventHeight = function(areaEventHeight) {
+	this._j._pixel._areaEventHeight = areaEventHeight;
+};
+/**
+* Gets whether a transfer from this event's active page lands relative to where the player crossed
+* its area.
+* @returns {boolean} True if the transfer's landing moves with the player's position.
+*/
+Game_Event.prototype.isRelativeTransfer = function() {
+	return this._j._pixel._relativeTransfer;
+};
+/**
+* Sets whether a transfer from this event's active page lands relative to where the player crossed
+* its area.
+* @param {boolean} isRelativeTransfer Whether the transfer's landing moves with the player's position.
+*/
+Game_Event.prototype.setRelativeTransfer = function(isRelativeTransfer) {
+	this._j._pixel._relativeTransfer = isRelativeTransfer;
+};
+/**
+* Extends {@link Game_Event.setupPage}.<br/>
+* Also reads the area the newly active page covers. An area belongs to a page rather than to the event,
+* so an exit that only opens once a switch flips can widen with the page that opens it.
+*/
+J.PIXEL.Aliased.Game_Event.set("setupPage", Game_Event.prototype.setupPage);
+Game_Event.prototype.setupPage = function() {
+	J.PIXEL.Aliased.Game_Event.get("setupPage").call(this);
+	this.refreshAreaEvent();
+};
+/**
+* Reads the area this event's active page covers, and whether a transfer from it remembers where the
+* player crossed. A page that declares no area covers the tile the event stands on and nothing else,
+* which is exactly what every event does when nothing says otherwise.
+*
+* Every comment line on the page is read, wherever it sits, the same as every other tag J-Base offers a
+* plugin. Should a page somehow declare its area twice, the last one written is the one that counts.
+*/
+Game_Event.prototype.refreshAreaEvent = function() {
+	const commentNote = this.commentNote();
+	const declaredArea = RPGManager.getArrayFromNotesByRegex(commentNote, J.PIXEL.RegExp.AreaEvent, true);
+	const [width, height] = declaredArea ?? [1, 1];
+	this.setAreaEventWidth(width);
+	this.setAreaEventHeight(height);
+	const isRelativeTransfer = RPGManager.checkForBooleanFromNoteByRegex(commentNote, J.PIXEL.RegExp.RelativeTransfer);
+	this.setRelativeTransfer(isRelativeTransfer);
+};
+/**
+* Overwrites {@link Game_CharacterBase#pos}.<br/>
+* An event stands on every tile of the area its active page covers: a rectangle of
+* {@link Game_Event#areaEventWidth} by {@link Game_Event#areaEventHeight} tiles whose top-left corner is
+* the tile its body occupies. Without an area that rectangle is the one occupied tile, which is exactly
+* the rule every other character answers with.
+*
+* Every question the engine asks about where an event is comes through here- the triggers in
+* {@link Game_Player#startMapEvent}, the collision checks pathfinding makes, Get Location Info- so they
+* all see the same area at once, and none of them has to know that areas exist. The area only ever
+* changes where an event counts as standing, never its body: pixel movement blocks against hitboxes,
+* which never ask this.
+* @param {number} x The x tile coordinate to compare against (expected to be an integer).
+* @param {number} y The y tile coordinate to compare against (expected to be an integer).
+* @returns {boolean} True if the tile lies inside this event's area.
+*/
+Game_Event.prototype.pos = function(x, y) {
+	const { left, top, width, height } = this.areaBounds();
+	const isWithinColumns = x >= left && x < left + width;
+	const isWithinRows = y >= top && y < top + height;
+	return isWithinColumns && isWithinRows;
+};
+/**
+* Gets the rectangle of tiles this event stands on: its active page's area, with the tile its body
+* occupies as the top-left corner.<br/>
+* The one statement of that rule. {@link Game_Event#pos} answers from it a tile at a time, and the
+* lookup a path search builds answers from it for every tile at once, so the two cannot drift apart.
+* @returns {{left: number, top: number, width: number, height: number}} The area, in tiles.
+*/
+Game_Event.prototype.areaBounds = function() {
+	return {
+		left: this.occupiedTileX(),
+		top: this.occupiedTileY(),
+		width: this.areaEventWidth(),
+		height: this.areaEventHeight()
+	};
+};
+/**
+* Measures how far across this event's area a character stands, in whole tiles from its left edge.<br/>
+* A character outside the area is measured from whichever edge is nearest, so the answer is always a
+* column the area actually has- which is also what makes a character facing the area from beside it
+* count as standing at its end.
+* @param {Game_Character} character The character to measure.
+* @returns {number} The column, from 0 up to one less than the area's width.
+*/
+Game_Event.prototype.areaColumnOf = function(character) {
+	const column = character.occupiedTileX() - this.occupiedTileX();
+	return column.clamp(0, this.areaEventWidth() - 1);
+};
+/**
+* Measures how far down this event's area a character stands, in whole tiles from its top edge.<br/>
+* See {@link Game_Event#areaColumnOf}, which this mirrors for the other axis.
+* @param {Game_Character} character The character to measure.
+* @returns {number} The row, from 0 up to one less than the area's height.
+*/
+Game_Event.prototype.areaRowOf = function(character) {
+	const row = character.occupiedTileY() - this.occupiedTileY();
+	return row.clamp(0, this.areaEventHeight() - 1);
+};
+/**
+* Determines whether or not one this event is collided with other events given the point.
+* @param {number} x The x coordinate.
+* @param {number} y The y coordinate.
+* @returns {boolean}
+*/
+Game_Event.prototype.isCollidedWithEvents = function(x, y) {
+	const events = $gameMap.eventsXyNt(x, y);
+	const colliders = events.filter((ev) => {
+		if (ev === this) return false;
+		if (ev.isErased()) return false;
+		if (ev.isThrough()) return false;
+		return true;
+	});
+	return colliders.length > 0;
+};
+/**
+* Overwrites {@link Game_CharacterBase.getCollisionPivotY}.<br/>
+* Anchors NPC and enemy event collision near their feet for natural depth feel.
+* JABS action events (projectiles) are flagged as through and bypass tile collision
+* entirely, so this override does not affect them.
+* @returns {number} The Y pivot offset in tile units.
+*/
+Game_Event.prototype.getCollisionPivotY = function() {
+	return .7;
+};
+/**
+* Overwrites {@link Game_CharacterBase.checkEventTriggerTouchFront}.<br/>
+* Vanilla computes the front tile from this event's raw `_x`/`_y`, which are fractional under
+* pixel movement — the downstream `$gamePlayer.pos(x2, y2)` integer-tile comparison could never
+* match. Derives the front tile from this event's occupied tile instead, so an Event Touch (NPC
+* bumps into the player) trigger fires correctly regardless of where mid-step this event is.
+* @param {number} d The direction this event is moving.
+*/
+Game_Event.prototype.checkEventTriggerTouchFront = function(d) {
+	const x2 = $gameMap.roundXWithDirection(this.occupiedTileX(), d);
+	const y2 = $gameMap.roundYWithDirection(this.occupiedTileY(), d);
+	this.checkEventTriggerTouch(x2, y2);
+};
+/**
+* Extends {@link Game_Event.stopCountThreshold}.<br/>
+* Vanilla pauses a page-level custom move route between commands by making the event wait out
+* the frequency threshold each time it comes to a stop, on the assumption that a stop means a
+* command has finished. Under pixel movement a single "Move X" command is repeated once per pixel
+* step to cover the tile ({@link Game_Character#handlePixelRoutineMove}), and every one of those
+* steps ends in a stop, so the pause was landing sixteen times per tile instead of once. While a
+* repeat cycle is active the command is still in progress, so the threshold is zero; once the
+* cycle ends the frequency pause applies exactly as the editor implies, between commands.
+* @returns {number}
+*/
+J.PIXEL.Aliased.Game_Event.set("stopCountThreshold", Game_Event.prototype.stopCountThreshold);
+Game_Event.prototype.stopCountThreshold = function() {
+	if (this.isRepeatMoveActive()) {
+		return 0;
+	}
+	return J.PIXEL.Aliased.Game_Event.get("stopCountThreshold").call(this);
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Follower.js
+/**
+* Updates the direction and position based on the preceding character.
+* This forces followers to always face the character infront of them in the follower train.
+* @param {Game_Follower|Game_Player} otherCharacter The character in front of this character in order.
+*/
+Game_Follower.prototype.pixelFaceCharacter = function(otherCharacter = $gamePlayer) {
+	const otherPosition = otherCharacter.oldestPositionalRecord();
+	if (!otherPosition) return;
+	const isFacingVertically = Math.abs(otherPosition.y - this.y) > Math.abs(otherPosition.x - this.x);
+	const shouldFaceDown = isFacingVertically && otherPosition.y > this.y;
+	const shouldFaceUp = isFacingVertically && otherPosition.y < this.y;
+	const shouldFaceRight = !isFacingVertically && otherPosition.x > this.x;
+	const shouldFaceLeft = !isFacingVertically && otherPosition.x < this.x;
+	switch (true) {
+		case shouldFaceDown:
+			this.setDirection(J.PIXEL.Directions.DOWN);
+			break;
+		case shouldFaceUp:
+			this.setDirection(J.PIXEL.Directions.UP);
+			break;
+		case shouldFaceLeft:
+			this.setDirection(J.PIXEL.Directions.LEFT);
+			break;
+		case shouldFaceRight:
+			this.setDirection(J.PIXEL.Directions.RIGHT);
+			break;
+	}
+};
+/**
+* Extends {@link Game_Follower.update}.<br/>
+* Ensures follower render coordinates always match logical coordinates.
+*/
+J.PIXEL.Aliased.Game_Follower.set("update", Game_Follower.prototype.update);
+Game_Follower.prototype.update = function() {
+	J.PIXEL.Aliased.Game_Follower.get("update").call(this);
+	if (this.realX() !== this.x || this.realY() !== this.y) {
+		this.setRealX(this.x);
+		this.setRealY(this.y);
+	}
+};
+/**
+* Whether this follower's position is owned by something other than the player's breadcrumb
+* train. The train relocates each follower onto the trail the character ahead of it left behind;
+* if another system is also steering the same follower, both write a position every frame and the
+* sprite visibly fights itself. A follower that answers true here is skipped by the train entirely,
+* on the understanding that whatever claimed it is now responsible for moving it.
+*
+* Pixel movement on its own has no such other system, so the answer is always no here. Ships that
+* introduce one - J-ABS-Pixelistics handing allies to formation movement, for instance - override
+* this to claim their followers.
+* @returns {boolean} True if the follower train must not move this follower, false otherwise.
+*/
+Game_Follower.prototype.isPixelTrainSuspended = function() {
+	return false;
+};
+/**
+* Overwrites {@link Game_CharacterBase.getCollisionPivotY}.<br/>
+* Anchors the follower's collision center near their feet to match the player's
+* depth-biased collision feel. Keeps the follower train visually consistent.
+* @returns {number} The Y pivot offset in tile units.
+*/
+Game_Follower.prototype.getCollisionPivotY = function() {
+	return .7;
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Interpreter.js
+/**
+* Extends {@link Game_Interpreter#command201}.<br/>
+* A Transfer Player run from an area that remembers where the player crossed first hands the player how
+* far along that area they stand, so the landing can be moved just as far along once the destination has
+* loaded. The destination's size is not known until then, which is why the offset travels with the
+* player rather than being added to the coordinates here. Every other transfer passes straight through.
+*
+* This wraps whichever Transfer Player is already in place, including the one J-ABS swaps in while it
+* is enabled, which is why this plugin loads after J-ABS.
+* @param {any[]} params The Transfer Player command's parameters.
+* @returns {boolean} True once the transfer is reserved, false while it waits on a message to close.
+*/
+J.PIXEL.Aliased.Game_Interpreter.set("command201", Game_Interpreter.prototype.command201);
+Game_Interpreter.prototype.command201 = function(params) {
+	if (this.isRelativeTransfer()) {
+		this.handOverRelativeTransferOffset();
+	}
+	return J.PIXEL.Aliased.Game_Interpreter.get("command201").call(this, params);
+};
+/**
+* Determines whether the transfer this interpreter is running comes from an area whose page remembers
+* where the player crossed it.
+* @returns {boolean} True if the transfer should land relative to the player's position.
+*/
+Game_Interpreter.prototype.isRelativeTransfer = function() {
+	if (this.eventId() === 0) return false;
+	if (this.isOnCurrentMap() === false) return false;
+	const areaEvent = $gameMap.event(this.eventId());
+	return areaEvent.isRelativeTransfer();
+};
+/**
+* Hands the player how far along this interpreter's area they stand, for the landing to be moved by once
+* the destination has loaded.
+*/
+Game_Interpreter.prototype.handOverRelativeTransferOffset = function() {
+	const areaEvent = $gameMap.event(this.eventId());
+	const column = areaEvent.areaColumnOf($gamePlayer);
+	const row = areaEvent.areaRowOf($gamePlayer);
+	$gamePlayer.setTransferOffsetX(column);
+	$gamePlayer.setTransferOffsetY(row);
+};
+
+//#endregion
+//#region src/plugins/pixel/core/managers/PathSearchEventIndex.js
+/**
+* Which events stand on which tile, built once for the length of a single path search.
+*
+* A search asks whether it can step onto thousands of tiles, and every one of those questions ends in
+* {@link Game_Map#eventsXyNt}, which the engine answers by walking every event on the map. On a map
+* of a hundred and fifty events that is most of a search's cost; on a big map it is nearly all of it.
+* Nothing moves while a search runs, though, so the answer for every tile can be worked out once, up
+* front, and each question then becomes a lookup.
+*
+* **It answers exactly what the engine's walk answers.** An event is listed on a tile when it is not
+* passing through things and its area covers that tile, which is the engine's `posNt` with the area
+* read from {@link Game_Event#areaBounds} - the same rule {@link Game_Event#pos} answers from. Events
+* are listed in the map's own order, and a tile nobody stands on answers with an empty list. Tiles are
+* kept by their own coordinates rather than folded into one number, so an area reaching past the edge
+* of the map is listed where it reaches, exactly as the walk would find it there.
+*
+* Coordinates are whole tiles, which is all a search ever asks about and all {@link Game_Event#pos}
+* promises to understand.
+*/
+var PathSearchEventIndex = class PathSearchEventIndex {
+	/**
+	* The events standing on each tile, by row and then by column, or null when no search is running.
+	* @type {Map<number, Map<number, Game_Event[]>>|null}
+	*/
+	static #rows = null;
+	/**
+	* Determines whether a search is running with its lookup built.
+	* @returns {boolean} True if the lookup is answering, false if the engine's walk should.
+	*/
+	static isBuilt() {
+		return PathSearchEventIndex.#rows !== null;
+	}
+	/**
+	* Builds the lookup from the events currently on the map.
+	* @param {Game_Event[]} events Every event on the map, in the map's own order.
+	*/
+	static build(events) {
+		PathSearchEventIndex.#rows = new Map();
+		events.forEach(PathSearchEventIndex.#place);
+	}
+	/**
+	* Lists an event on every tile its area covers, unless it passes through things and so blocks nothing.
+	* @param {Game_Event} event The event to list.
+	*/
+	static #place(event) {
+		if (event.isThrough() === true) return;
+		const { left, top, width, height } = event.areaBounds();
+		for (let y = top; y < top + height; y++) {
+			for (let x = left; x < left + width; x++) {
+				PathSearchEventIndex.#tileAt(x, y).push(event);
+			}
+		}
+	}
+	/**
+	* Gets the list for a tile, starting an empty one the first time an event is placed on it.
+	* @param {number} x The tile's x coordinate.
+	* @param {number} y The tile's y coordinate.
+	* @returns {Game_Event[]} The events listed on that tile so far.
+	*/
+	static #tileAt(x, y) {
+		const rows = PathSearchEventIndex.#rows;
+		let row = rows.get(y);
+		if (row === undefined) {
+			row = new Map();
+			rows.set(y, row);
+		}
+		let tile = row.get(x);
+		if (tile === undefined) {
+			tile = [];
+			row.set(x, tile);
+		}
+		return tile;
+	}
+	/**
+	* Gets the events standing on a tile, as {@link Game_Map#eventsXyNt} would.
+	* @param {number} x The tile's x coordinate.
+	* @param {number} y The tile's y coordinate.
+	* @returns {Game_Event[]} A fresh list of the events there, empty when there are none.
+	*/
+	static eventsAt(x, y) {
+		const row = PathSearchEventIndex.#rows.get(y);
+		if (row === undefined) return [];
+		const tile = row.get(x);
+		if (tile === undefined) return [];
+		return [...tile];
+	}
+	/**
+	* Throws the lookup away once the search is done, since the next thing to move would make it wrong.
+	*/
+	static clear() {
+		PathSearchEventIndex.#rows = null;
+	}
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Map.js
+/**
+* Extends {@link Game_Map.setup}.<br/>
+* Builds the PIXEL subcell collision table when a new map loads.
+* @param {number} mapId The id of the map to setup.
+*/
+J.PIXEL.Aliased.Game_Map.set("setup", Game_Map.prototype.setup);
+Game_Map.prototype.setup = function(mapId) {
+	J.PIXEL.Aliased.Game_Map.get("setup").call(this, mapId);
+	PIXEL_CollisionManager.setupCollision();
+	this._pixelFootTouchTriggerCooldown = J.PIXEL.Metadata.FootTouchEventDelayFrames;
+};
+/**
+* Runs a path search with a lookup of which events stand on which tile, built for its length.<br/>
+* See {@link PathSearchEventIndex} for why. The lookup is thrown away the moment the search ends,
+* however it ends, since the next thing to move would make it wrong.
+* @param {function(): {x: number, y: number, reachedGoal: boolean}} search The search to run.
+* @returns {{x: number, y: number, reachedGoal: boolean}} Whatever the search answered.
+*/
+Game_Map.prototype.searchWithEventIndex = function(search) {
+	PathSearchEventIndex.build(this.events());
+	try {
+		return search();
+	} finally {
+		PathSearchEventIndex.clear();
+	}
+};
+/**
+* Extends {@link Game_Map#eventsXyNt}.<br/>
+* Answers from the path search lookup while one is built, and walks every event as the engine does
+* otherwise. Both give the same answer; the lookup just gives it without the walk.
+* @param {number} x The x tile coordinate.
+* @param {number} y The y tile coordinate.
+* @returns {Game_Event[]} The events standing on that tile that do not pass through things.
+*/
+J.PIXEL.Aliased.Game_Map.set("eventsXyNt", Game_Map.prototype.eventsXyNt);
+Game_Map.prototype.eventsXyNt = function(x, y) {
+	if (PathSearchEventIndex.isBuilt() === true) return PathSearchEventIndex.eventsAt(x, y);
+	return J.PIXEL.Aliased.Game_Map.get("eventsXyNt").call(this, x, y);
+};
+
+//#endregion
+//#region src/plugins/pixel/core/objects/Game_Player.js
+/**
+* Extends {@link Game_Player.initMembers}.<br/>
+* Also seeds the offset a relative transfer carries across maps, which is none until one is handed over.
+*/
+J.PIXEL.Aliased.Game_Player.set("initMembers", Game_Player.prototype.initMembers);
+Game_Player.prototype.initMembers = function() {
+	J.PIXEL.Aliased.Game_Player.get("initMembers").call(this);
+	this.initRelativeTransferMembers();
+};
+/**
+* Initializes the offset a relative transfer hands the player, which only ever holds anything between a
+* Transfer Player reserving the transfer and the player landing at the other end.
+*/
+Game_Player.prototype.initRelativeTransferMembers = function() {
+	/**
+	* How many tiles rightward to move the reserved landing once the destination has loaded.
+	* @type {number}
+	*/
+	this._j._pixel._transferOffsetX = 0;
+	/**
+	* How many tiles downward to move the reserved landing once the destination has loaded.
+	* @type {number}
+	*/
+	this._j._pixel._transferOffsetY = 0;
+};
+/**
+* Overwrites {@link Game_Player.checkEventTriggerHere}.<br/>
+* Checks the tile this character's body actually occupies (the collision pivot's tile) rather
+* than the fractional `_x`/`_y` vanilla assumes are already integers.
+* @param {number[]} triggers The numeric triggers for this event.
+*/
+Game_Player.prototype.checkEventTriggerHere = function(triggers) {
+	if (this.canStartLocalEvents()) {
+		let effectiveTriggers = triggers;
+		if (($gameMap._pixelFootTouchTriggerCooldown || 0) > 0) {
+			effectiveTriggers = triggers.filter((t) => t !== 1 && t !== 2);
+			if (effectiveTriggers.length === 0) {
+				return;
+			}
+		}
+		this.startMapEvent(this.occupiedTileX(), this.occupiedTileY(), effectiveTriggers, false);
+	}
+};
+/**
+* Extends {@link Game_Player.update}.<br/>
+* Ticks down the foot-touch trigger cooldown after all movement and trigger logic for the frame,
+* then fires underfoot touch triggers exactly once per tile entered.
+*/
+J.PIXEL.Aliased.Game_Player.set("update", Game_Player.prototype.update);
+Game_Player.prototype.update = function(sceneActive) {
+	J.PIXEL.Aliased.Game_Player.get("update").call(this, sceneActive);
+	if ($gameMap._pixelFootTouchTriggerCooldown > 0) {
+		$gameMap._pixelFootTouchTriggerCooldown--;
+	}
+	const tileX = this.occupiedTileX();
+	const tileY = this.occupiedTileY();
+	if (this.lastOccupiedTileX() !== tileX || this.lastOccupiedTileY() !== tileY) {
+		this.setLastOccupiedTileX(tileX);
+		this.setLastOccupiedTileY(tileY);
+		this.checkEventTriggerHere([1, 2]);
+	}
+};
+/**
+* Overwrites {@link Game_Player.checkEventTriggerThere}.<br/>
+* Checks the player's own occupied tile before the front tile: under pixel movement a
+* feet-anchored body can legitimately be standing on an event's tile (e.g. a doorstep whose
+* blocking wall is the row behind it) even though the tile "in front" per vanilla's model is
+* something else entirely (the wall). Vanilla's model — only ever check the tile ahead — assumes
+* tile-locked movement where that overlap can't happen. Then computes the front tile from the
+* current facing using the occupied-tile coordinates, and if that tile is a counter, checks one
+* tile beyond — matching vanilla's own guard against double-starting an event across both checks.
+* @param {number[]} triggers The triggers associated with checking the event at the location.
+*/
+Game_Player.prototype.checkEventTriggerThere = function(triggers) {
+	if (this.canStartLocalEvents() === false) return;
+	const baseX = this.occupiedTileX();
+	const baseY = this.occupiedTileY();
+	this.startMapEvent(baseX, baseY, triggers, true);
+	if ($gameMap.isAnyEventStarting()) return;
+	const dir = this.direction();
+	const x1 = $gameMap.roundXWithDirection(baseX, dir);
+	const y1 = $gameMap.roundYWithDirection(baseY, dir);
+	this.startMapEvent(x1, y1, triggers, true);
+	if ($gameMap.isAnyEventStarting() === false && $gameMap.isCounter(x1, y1)) {
+		const x2 = $gameMap.roundXWithDirection(x1, dir);
+		const y2 = $gameMap.roundYWithDirection(y1, dir);
+		this.startMapEvent(x2, y2, triggers, true);
+	}
+};
+/**
+* Extends {@link checkEventTriggerTouch}.<br/>
+* Handles the triggering of events by using a threshold-type formula to determine if actually touched.
+* Vanilla's version reports nothing at all, so this asks the map whether an event is now starting
+* and hands that back- callers need a real answer to know whether to keep searching neighboring
+* tiles, and {@link Game_Player#checkEventTriggerThere} already uses the same map-level question
+* as its own short-circuit.
+* @param {number} x The fractional x coordinate to test for a touch.
+* @param {number} y The fractional y coordinate to test for a touch.
+* @returns {boolean} True if an event is starting after this check, false otherwise.
+*/
+J.PIXEL.Aliased.Game_Player.set("checkEventTriggerTouch", Game_Player.prototype.checkEventTriggerTouch);
+Game_Player.prototype.checkEventTriggerTouch = function(x, y) {
+	const roundX = Math.round(x);
+	const roundY = Math.round(y);
+	const didTrigger = Math.abs(roundX - x) < .3 && Math.abs(roundY - y) < .3;
+	if (didTrigger === false) return false;
+	J.PIXEL.Aliased.Game_Player.get("checkEventTriggerTouch").call(this, roundX, roundY);
+	return $gameMap.isAnyEventStarting();
+};
+/**
+* Overwrites {@link Game_Player.checkEventTriggerTouchFront}.<br/>
+* Checks the player's own occupied tile first — a blocked player can be overlapping an event's
+* tile (doorstep geometry) and should still fire its touch trigger, not just the tile ahead. Then
+* computes the front tile from the current facing using the occupied-tile coordinates, checks for
+* touch triggers there via PIXEL threshold logic, and if the front tile is a counter, also checks
+* the tile beyond.
+* @param {number} direction The attempted move direction (ignored; uses current facing).
+* @returns {boolean} True if a touch trigger fired, false otherwise.
+*/
+Game_Player.prototype.checkEventTriggerTouchFront = function(direction) {
+	const baseX = this.occupiedTileX();
+	const baseY = this.occupiedTileY();
+	if (this.checkEventTriggerTouch(baseX, baseY)) {
+		return true;
+	}
+	const dir = this.direction();
+	const x1 = $gameMap.roundXWithDirection(baseX, dir);
+	const y1 = $gameMap.roundYWithDirection(baseY, dir);
+	if (this.checkEventTriggerTouch(x1, y1)) {
+		return true;
+	}
+	const isCounter = $gameMap.isCounter(x1, y1);
+	if (isCounter) {
+		const x2 = $gameMap.roundXWithDirection(x1, dir);
+		const y2 = $gameMap.roundYWithDirection(y1, dir);
+		if (this.checkEventTriggerTouch(x2, y2)) {
+			return true;
+		}
+	}
+	return false;
+};
+/**
+* Updates whether or not the player is dashing.
+*/
+Game_Player.prototype.updateDashing = function() {
+	if (this.isMoving() && !this.isMovePressed()) return;
+	if (this.canMove() && !this.isInVehicle() && !$gameMap.isDashDisabled()) {
+		this._dashing = this.isDashButtonPressed() || $gameTemp.isDestinationValid();
+		return;
+	}
+	this._dashing = false;
+};
+/**
+* Gets the analog input angle for the player in degrees, if vector movement is active.
+* Reads raw gamepad axis data directly from the Gamepad API to preserve sub-45° precision.
+* Falls back to keyboard/d-pad dir8-to-angle conversion when no analog stick is active.
+* Returns null if vector movement is disabled or there is no directional input at all.
+* @returns {number|null} Angle in degrees (0=right, 90=down), or null if not applicable.
+*/
+Game_Player.prototype.getVectorInputAngle = function() {
+	if (J.PIXEL.Metadata.VectorMovementEnabled === false) {
+		return null;
+	}
+	const analogAngle = this._readGamepadAnalogAngle();
+	if (analogAngle !== null) {
+		return analogAngle;
+	}
+	const rawDir8 = Input.dir8;
+	if (rawDir8 === 0) {
+		return null;
+	}
+	return this.dir8ToAngle(rawDir8);
+};
+/**
+* Reads the left analog stick from the first connected gamepad and returns the angle
+* in degrees, or null if no gamepad is present or the stick is inside the dead zone.
+*
+* RMMZ's Input system discards raw axis floats before they reach Input.dir8, converting
+* them to digital button states with a 0.5 threshold. To get true arbitrary angles we
+* must bypass RMMZ and read navigator.getGamepads() directly.
+*
+* Dead zone of 0.15 (smaller than RMMZ's 0.5 threshold) filters joystick drift while
+* still detecting gentle pushes before RMMZ's digital conversion fires.
+*
+* @returns {number|null} Angle in degrees (0=right, 90=down in RMMZ Y-down space), or null.
+*/
+Game_Player.prototype._readGamepadAnalogAngle = function() {
+	if (!navigator.getGamepads) {
+		return null;
+	}
+	const gamepads = navigator.getGamepads();
+	if (!gamepads) {
+		return null;
+	}
+	for (const gamepad of gamepads) {
+		if (!gamepad || gamepad.connected === false) {
+			continue;
+		}
+		const [axisX, axisY] = gamepad.axes;
+		const magnitude = Math.sqrt(axisX * axisX + axisY * axisY);
+		if (magnitude < .15) {
+			continue;
+		}
+		return Math.atan2(axisY, axisX) * 180 / Math.PI;
+	}
+	return null;
+};
+/**
+* Converts an 8-direction input code to an angle in degrees.
+* @param {1|2|3|4|6|7|8|9} dir8 The 8-direction code.
+* @returns {number} The angle in degrees (0=right, 90=down).
+*/
+Game_Player.prototype.dir8ToAngle = function(dir8) {
+	switch (dir8) {
+		case J.PIXEL.Directions.RIGHT: return 0;
+		case J.PIXEL.Directions.LOWERRIGHT: return 45;
+		case J.PIXEL.Directions.DOWN: return 90;
+		case J.PIXEL.Directions.LOWERLEFT: return 135;
+		case J.PIXEL.Directions.LEFT: return 180;
+		case J.PIXEL.Directions.UPPERLEFT: return 225;
+		case J.PIXEL.Directions.UP: return 270;
+		case J.PIXEL.Directions.UPPERRIGHT: return 315;
+		default: return 0;
+	}
+};
+/**
+* Overwrites {@link Game_Player.moveByInput}.<br/>
+* The meat and potatoes for pixel movement of the player.
+* Handles keyboard/gamepad directional input and click-to-move via destination coordinates.
+*/
+Game_Player.prototype.moveByInput = function() {
+	const notMovingButShouldBe = !this.isMoving() || this.isMovePressed();
+	if (notMovingButShouldBe && this.canMove()) {
+		let direction = Input.dir8;
+		if (direction > 0) {
+			$gameTemp.clearDestination();
+			const vectorAngle = this.getVectorInputAngle();
+			if (vectorAngle !== null) {
+				const moved = this.vectorMoveByAngle(vectorAngle);
+				if (moved) {
+					this.processFollowersPixelMoving();
+					this.setMovePressed(true);
+				} else {
+					this.stopFollowersPixelMoving();
+					this.setMovePressed(false);
+					this.checkEventTriggerTouchFront(direction);
+				}
+				return;
+			}
+			if (!this.isMovePressed()) {
+				this.clearPositionalRecords();
+				const followers = this.followers()._data;
+				followers.forEach((follower) => follower.clearPositionalRecords());
+			}
+			this.setMovementSuccess(false);
+			direction = this.pixelMoveByInput(direction);
+			this.setDirection(direction);
+			if (this.isMovementSucceeded()) {
+				this.processFollowersPixelMoving();
+				this.setMovePressed(true);
+			} else {
+				this.stopFollowersPixelMoving();
+				this.setMovePressed(false);
+				this.checkEventTriggerTouchFront(direction);
+			}
+			return;
+		}
+		if ($gameTemp.isDestinationValid()) {
+			this.pixelMoveTowardDestination();
+			return;
+		}
+	}
+	this.stopFollowersPixelMoving();
+	this.setMovePressed(false);
+};
+/**
+* Moves the player one pixel step toward the current click-to-move destination.
+* Clears the destination when the player arrives at the target tile.
+*/
+Game_Player.prototype.pixelMoveTowardDestination = function() {
+	const destX = $gameTemp.destinationX();
+	const destY = $gameTemp.destinationY();
+	const roundX = Math.round(this.x);
+	const roundY = Math.round(this.y);
+	if (roundX === destX && roundY === destY) {
+		$gameTemp.clearDestination();
+		this.stopFollowersPixelMoving();
+		this.setMovePressed(false);
+		return;
+	}
+	const dir = this.findDirectionTo(destX, destY);
+	if (dir === 0) {
+		$gameTemp.clearDestination();
+		this.stopFollowersPixelMoving();
+		this.setMovePressed(false);
+		return;
+	}
+	this.setMovementSuccess(false);
+	const facedDirection = this.pixelMoveByInput(dir);
+	this.setDirection(facedDirection);
+	if (this.isMovementSucceeded()) {
+		this.processFollowersPixelMoving();
+		this.setMovePressed(true);
+	} else {
+		this.stopFollowersPixelMoving();
+		this.setMovePressed(false);
+	}
+};
+/**
+* Extends {@link #onStep}.<br/>
+* Also processes on-step effects for the player.
+*/
+J.PIXEL.Aliased.Game_Player.set("onStep", Game_Player.prototype.onStep);
+Game_Player.prototype.onStep = function() {
+	J.PIXEL.Aliased.Game_Player.get("onStep").call(this);
+	this.handleOnStepEffects();
+};
+/**
+* Handles the various things to do on-step.
+*/
+Game_Player.prototype.handleOnStepEffects = function() {
+	this.increaseSteps();
+	this.checkEventTriggerHere([1, 2]);
+};
+/**
+* Processes the pixel movement for followers.
+*/
+Game_Player.prototype.processFollowersPixelMoving = function() {
+	this.recordPixelPosition();
+	const followers = this.followers()._data;
+	followers.forEach((follower, index) => {
+		if (follower.isPixelTrainSuspended()) return;
+		const precedingCharacter = index > 0 ? followers.at(index - 1) : $gamePlayer;
+		follower.pixelFaceCharacter(precedingCharacter);
+		const last = precedingCharacter.oldestPositionalRecord();
+		if (last) {
+			follower.relocate(last.x, last.y);
+		}
+		follower.startPixelMoving();
+	});
+};
+/**
+* Stops the pixel movement for followers.
+*/
+Game_Player.prototype.stopFollowersPixelMoving = function() {
+	this.followers()._data.forEach((follower) => {
+		if (follower.isPixelTrainSuspended()) return;
+		follower.stopPixelMoving();
+	});
+};
+/**
+* Overwrites {@link Game_CharacterBase.getCollisionPivotY}.<br/>
+* Anchors the player's collision center near their feet rather than the tile center.
+* This gives the implied top-down perspective its natural depth feel: the player can
+* slide closer to objects from below (approaching northward) and is gently blocked
+* sooner from above (approaching southward), matching visual depth expectations.
+* @returns {number} The Y pivot offset in tile units.
+*/
+Game_Player.prototype.getCollisionPivotY = function() {
+	return .7;
+};
+/**
+* Extends {@link Game_Player.performTransfer}.<br/>
+* A transfer from an area that remembers where the player crossed moves its landing just as far along
+* before the player is placed. This is the first moment the destination map has loaded, so it is the
+* first moment its edges are known.
+*/
+J.PIXEL.Aliased.Game_Player.set("performTransfer", Game_Player.prototype.performTransfer);
+Game_Player.prototype.performTransfer = function() {
+	if (this.hasTransferOffset()) {
+		this.applyTransferOffset();
+	}
+	J.PIXEL.Aliased.Game_Player.get("performTransfer").call(this);
+};
+/**
+* Determines whether a relative transfer has handed the player an offset that is still to be applied.
+* Crossing at the event's own tile hands over nothing, since that landing is already the authored one.
+* @returns {boolean} True if the reserved landing still needs moving.
+*/
+Game_Player.prototype.hasTransferOffset = function() {
+	return this.transferOffsetX() !== 0 || this.transferOffsetY() !== 0;
+};
+/**
+* Moves the reserved landing by the offset a relative transfer handed over, keeps it on the destination
+* map, and spends the offset.<br/>
+* A landing that has to be pulled back onto the map means the opening on one side runs longer than the
+* opening on the other. The player lands on the destination's edge rather than off the world, and the
+* mismatch is reported, since it is an authoring fix rather than something to quietly absorb.
+*/
+Game_Player.prototype.applyTransferOffset = function() {
+	const shiftedX = this.newX() + this.transferOffsetX();
+	const shiftedY = this.newY() + this.transferOffsetY();
+	const landingX = shiftedX.clamp(0, $dataMap.width - 1);
+	const landingY = shiftedY.clamp(0, $dataMap.height - 1);
+	if (landingX !== shiftedX || landingY !== shiftedY) {
+		const message = "a relative transfer would have landed off its map, so it lands on the edge instead.";
+		const details = {
+			mapId: this.newMapId(),
+			x: shiftedX,
+			y: shiftedY
+		};
+		Diagnostics.warn("J-Pixelistics", message, details);
+	}
+	this.reserveTransfer(this.newMapId(), landingX, landingY, this.newDirection(), this.fadeType());
+	this.setTransferOffsetX(0);
+	this.setTransferOffsetY(0);
+};
+/**
+* Gets how many tiles rightward the reserved landing moves once the destination has loaded.
+* @returns {number} The offset, in tiles.
+*/
+Game_Player.prototype.transferOffsetX = function() {
+	return this._j._pixel._transferOffsetX;
+};
+/**
+* Sets how many tiles rightward the reserved landing moves once the destination has loaded.
+* @param {number} transferOffsetX The offset, in tiles.
+*/
+Game_Player.prototype.setTransferOffsetX = function(transferOffsetX) {
+	this._j._pixel._transferOffsetX = transferOffsetX;
+};
+/**
+* Gets how many tiles downward the reserved landing moves once the destination has loaded.
+* @returns {number} The offset, in tiles.
+*/
+Game_Player.prototype.transferOffsetY = function() {
+	return this._j._pixel._transferOffsetY;
+};
+/**
+* Sets how many tiles downward the reserved landing moves once the destination has loaded.
+* @param {number} transferOffsetY The offset, in tiles.
+*/
+Game_Player.prototype.setTransferOffsetY = function(transferOffsetY) {
+	this._j._pixel._transferOffsetY = transferOffsetY;
+};
+/**
+* Gets the last occupied tile x.
+* @returns {number} The lastOccupiedTileX.
+*/
+Game_Player.prototype.lastOccupiedTileX = function() {
+	return this._lastOccupiedTileX;
+};
+/**
+* Sets the last occupied tile x.
+* @param {number} newLastOccupiedTileX The new lastOccupiedTileX.
+*/
+Game_Player.prototype.setLastOccupiedTileX = function(newLastOccupiedTileX) {
+	this._lastOccupiedTileX = newLastOccupiedTileX;
+};
+/**
+* Gets the last occupied tile y.
+* @returns {number} The lastOccupiedTileY.
+*/
+Game_Player.prototype.lastOccupiedTileY = function() {
+	return this._lastOccupiedTileY;
+};
+/**
+* Sets the last occupied tile y.
+* @param {number} newLastOccupiedTileY The new lastOccupiedTileY.
+*/
+Game_Player.prototype.setLastOccupiedTileY = function(newLastOccupiedTileY) {
+	this._lastOccupiedTileY = newLastOccupiedTileY;
+};
+
+//#endregion
+//#region src/plugins/pixel/core/sprites/Sprite_PixelCollisionOverlay.js
+/**
+* A sprite that visualizes the PIXEL subcell collision table and the player's hitbox.
+* Draws only the currently visible subcells for performance.
+*/
+var Sprite_PixelCollisionOverlay = class extends Sprite {
+	/**
+	* Gets the show grid lines.
+	* @returns {boolean} The showGridLines.
+	*/
+	isShowGridLines() {
+		return this._showGridLines;
+	}
+	/**
+	* Gets the throttle.
+	* @returns {number} The throttle.
+	*/
+	throttle() {
+		return this._throttle;
+	}
+	/**
+	* Sets the throttle.
+	* @param {number} newThrottle The new throttle.
+	*/
+	setThrottle(newThrottle) {
+		this._throttle = newThrottle;
+	}
+	/**
+	* Gets the last display x.
+	* @returns {number} The lastDisplayX.
+	*/
+	lastDisplayX() {
+		return this._lastDisplayX;
+	}
+	/**
+	* Sets the last display x.
+	* @param {number} newLastDisplayX The new lastDisplayX.
+	*/
+	setLastDisplayX(newLastDisplayX) {
+		this._lastDisplayX = newLastDisplayX;
+	}
+	/**
+	* Gets the last display y.
+	* @returns {number} The lastDisplayY.
+	*/
+	lastDisplayY() {
+		return this._lastDisplayY;
+	}
+	/**
+	* Sets the last display y.
+	* @param {number} newLastDisplayY The new lastDisplayY.
+	*/
+	setLastDisplayY(newLastDisplayY) {
+		this._lastDisplayY = newLastDisplayY;
+	}
+	/**
+	* Gets the last player x.
+	* @returns {number} The lastPlayerX.
+	*/
+	lastPlayerX() {
+		return this._lastPlayerX;
+	}
+	/**
+	* Sets the last player x.
+	* @param {number} newLastPlayerX The new lastPlayerX.
+	*/
+	setLastPlayerX(newLastPlayerX) {
+		this._lastPlayerX = newLastPlayerX;
+	}
+	/**
+	* Gets the last player y.
+	* @returns {number} The lastPlayerY.
+	*/
+	lastPlayerY() {
+		return this._lastPlayerY;
+	}
+	/**
+	* Sets the last player y.
+	* @param {number} newLastPlayerY The new lastPlayerY.
+	*/
+	setLastPlayerY(newLastPlayerY) {
+		this._lastPlayerY = newLastPlayerY;
+	}
+	/**
+	* Constructor.
+	*/
+	constructor() {
+		super();
+		this.initialize();
+	}
+	/**
+	* Initializes the overlay's bitmap and configuration.
+	*/
+	initialize() {
+		super.initialize();
+		this.bitmap = new Bitmap(Graphics.width, Graphics.height);
+		this.z = 10;
+		this.bitmap.smooth = false;
+		this._throttle = 0;
+		this._lastDisplayX = -9999;
+		this._lastDisplayY = -9999;
+		this._lastPlayerX = -9999;
+		this._lastPlayerY = -9999;
+		this._showGridLines = true;
+		this.opacity = 180;
+	}
+	/**
+	* Updates the overlay each frame.
+	*/
+	update() {
+		super.update();
+		if (this.visible === false) return;
+		if (!$gameMap || !$dataMap) {
+			return;
+		}
+		const tw = $gameMap.tileWidth();
+		const th = $gameMap.tileHeight();
+		const dx = $gameMap.displayX();
+		const dy = $gameMap.displayY();
+		this.x = -Math.floor(dx * tw);
+		this.y = -Math.floor(dy * th);
+		this.setThrottle(this.throttle() + 1);
+		const needThrottleRedraw = this.throttle() % 6 === 0;
+		const cameraMoved = dx !== this.lastDisplayX() || dy !== this.lastDisplayY();
+		const player = $gamePlayer;
+		const playerMoved = player && (player.x !== this.lastPlayerX() || player.y !== this.lastPlayerY());
+		if (!needThrottleRedraw && cameraMoved === false && playerMoved === false) {
+			return;
+		}
+		this.setLastDisplayX(dx);
+		this.setLastDisplayY(dy);
+		if (player) {
+			this.setLastPlayerX(player.x);
+			this.setLastPlayerY(player.y);
+		}
+		this.redrawVisibleRegion();
+	}
+	/**
+	* Redraws the bitmap for the currently visible region of the map.
+	*/
+	redrawVisibleRegion() {
+		this.bitmap.clear();
+		if (PIXEL_CollisionManager.collisionStepCount === undefined) {
+			PIXEL_CollisionManager.initConfig();
+		}
+		const stepCount = PIXEL_CollisionManager.collisionStepCount;
+		const subSizeX = $gameMap.tileWidth() / stepCount;
+		const subSizeY = $gameMap.tileHeight() / stepCount;
+		const tw = $gameMap.tileWidth();
+		const th = $gameMap.tileHeight();
+		const dx = $gameMap.displayX();
+		const dy = $gameMap.displayY();
+		const tilesWide = Math.ceil(Graphics.width / tw) + 2;
+		const tilesHigh = Math.ceil(Graphics.height / th) + 2;
+		const tileStartX = Math.floor(dx);
+		const tileStartY = Math.floor(dy);
+		const tileEndX = Math.min(tileStartX + tilesWide, $gameMap.width());
+		const tileEndY = Math.min(tileStartY + tilesHigh, $gameMap.height());
+		for (let ty = tileStartY; ty < tileEndY; ty++) {
+			for (let tx = tileStartX; tx < tileEndX; tx++) {
+				for (let sy = 0; sy < stepCount; sy++) {
+					const subWorldY = ty + sy / stepCount;
+					const py = Math.floor((subWorldY - dy) * th);
+					for (let sx = 0; sx < stepCount; sx++) {
+						const subWorldX = tx + sx / stepCount;
+						const code = this._readCode(subWorldX, subWorldY);
+						const color = this._colorForCode(code);
+						if (!color) {
+							continue;
+						}
+						const px = Math.floor((subWorldX - dx) * tw);
+						this.bitmap.fillRect(px, py, Math.ceil(subSizeX), Math.ceil(subSizeY), color);
+					}
+				}
+			}
+		}
+		if (this.isShowGridLines()) {
+			this._drawGridLines(tileStartX, tileStartY, tileEndX, tileEndY, stepCount, tw, th, dx, dy);
+		}
+		this._drawPlayerHitbox();
+		this._drawSampleTraces();
+		PixelDebugSampler.clear();
+	}
+	/**
+	* Reads a code from the collision table for a fractional tile coordinate.
+	* @param {number} subWorldX The fractional tile x.
+	* @param {number} subWorldY The fractional tile y.
+	* @returns {number} The stored code (or Open if missing).
+	*/
+	_readCode(subWorldX, subWorldY) {
+		const idx = PIXEL_CollisionManager._index(subWorldX, subWorldY);
+		return PIXEL_CollisionManager._table[idx] || PIXEL_CollisionManager.Codes.Open;
+	}
+	/**
+	* Maps collision codes to semi-transparent colors for display.
+	* @param {number} code The collision code.
+	* @returns {string|null} A CSS color string, or null for transparent skip.
+	*/
+	_colorForCode(code) {
+		switch (code) {
+			case PIXEL_CollisionManager.Codes.Open: return null;
+			case PIXEL_CollisionManager.Codes.Solid: return "rgba(255, 0, 0, 0.35)";
+			case PIXEL_CollisionManager.Codes.VerticalLine: return "rgba(40, 120, 255, 0.35)";
+			case PIXEL_CollisionManager.Codes.HorizontalLine: return "rgba(0, 220, 220, 0.35)";
+			case PIXEL_CollisionManager.Codes.EdgeLeft: return "rgba(255, 140, 0, 0.40)";
+			case PIXEL_CollisionManager.Codes.EdgeRight: return "rgba(255, 110, 0, 0.40)";
+			case PIXEL_CollisionManager.Codes.EdgeDown: return "rgba(220, 0, 180, 0.40)";
+			case PIXEL_CollisionManager.Codes.EdgeUp: return "rgba(180, 0, 220, 0.40)";
+			case PIXEL_CollisionManager.Codes.CornerBottomLeft:
+			case PIXEL_CollisionManager.Codes.CornerBottomRight:
+			case PIXEL_CollisionManager.Codes.CornerTopLeft:
+			case PIXEL_CollisionManager.Codes.CornerTopRight: return "rgba(255, 255, 0, 0.40)";
+			default: return "rgba(200, 200, 200, 0.25)";
+		}
+	}
+	/**
+	* Draws faint subgrid lines to visualize seam alignment.
+	* @param {number} tileStartX Start tile x.
+	* @param {number} tileStartY Start tile y.
+	* @param {number} tileEndX End tile x.
+	* @param {number} tileEndY End tile y.
+	* @param {number} stepCount Subcells per tile edge.
+	* @param {number} tw Tile width in pixels.
+	* @param {number} th Tile height in pixels.
+	* @param {number} dx Display origin x in tiles.
+	* @param {number} dy Display origin y in tiles.
+	*/
+	_drawGridLines(tileStartX, tileStartY, tileEndX, tileEndY, stepCount, tw, th, dx, dy) {
+		const tileLine = "rgba(255,255,255,0.12)";
+		const subLine = "rgba(255,255,255,0.06)";
+		const pxStart = Math.floor((tileStartX - dx) * tw);
+		const pyStart = Math.floor((tileStartY - dy) * th);
+		const pxEnd = Math.ceil((tileEndX - dx) * tw);
+		const pyEnd = Math.ceil((tileEndY - dy) * th);
+		for (let tx = tileStartX; tx <= tileEndX; tx++) {
+			const px = Math.floor((tx - dx) * tw);
+			this.bitmap.fillRect(px, pyStart, 1, pyEnd - pyStart, tileLine);
+			for (let s = 1; s < stepCount; s++) {
+				const psx = Math.floor((tx - dx) * tw + s * (tw / stepCount));
+				this.bitmap.fillRect(psx, pyStart, 1, pyEnd - pyStart, subLine);
+			}
+		}
+		for (let ty = tileStartY; ty <= tileEndY; ty++) {
+			const py = Math.floor((ty - dy) * th);
+			this.bitmap.fillRect(pxStart, py, pxEnd - pxStart, 1, tileLine);
+			for (let s = 1; s < stepCount; s++) {
+				const psy = Math.floor((ty - dy) * th + s * (th / stepCount));
+				this.bitmap.fillRect(pxStart, psy, pxEnd - pxStart, 1, subLine);
+			}
+		}
+	}
+	/**
+	* Draws the player's collision hitbox rectangle over the overlay.
+	*/
+	_drawPlayerHitbox() {
+		if (!$gamePlayer) {
+			return;
+		}
+		const cx = $gamePlayer.x + $gamePlayer.getCollisionPivotX();
+		const cy = $gamePlayer.y + $gamePlayer.getCollisionPivotY();
+		const radius = $gamePlayer.getEffectiveRadius();
+		const hb = $gamePlayer._pixelHitbox(radius);
+		const left = cx + hb.hx;
+		const top = cy + hb.hy;
+		const widthTiles = hb.w;
+		const heightTiles = hb.h;
+		const tw = $gameMap.tileWidth();
+		const th = $gameMap.tileHeight();
+		const dx = $gameMap.displayX();
+		const dy = $gameMap.displayY();
+		const px = Math.floor((left - dx) * tw);
+		const py = Math.floor((top - dy) * th);
+		const pw = Math.ceil(widthTiles * tw);
+		const ph = Math.ceil(heightTiles * th);
+		this._strokeRect(px, py, pw, ph, "rgba(0, 255, 0, 0.9)");
+		const cxp = Math.floor((cx - dx) * tw);
+		const cyp = Math.floor((cy - dy) * th);
+		this.bitmap.fillRect(cxp - 2, cyp, 5, 1, "rgba(0,255,0,0.9)");
+		this.bitmap.fillRect(cxp, cyp - 2, 1, 5, "rgba(0,255,0,0.9)");
+	}
+	/**
+	* Draws one-frame sample traces emitted by the collision checks.
+	*/
+	_drawSampleTraces() {
+		if (PixelDebugSampler.enabled === false) return;
+		const dbg = PixelDebugSampler;
+		if (!dbg.samples || dbg.samples.length === 0) return;
+		const tw = $gameMap.tileWidth();
+		const th = $gameMap.tileHeight();
+		const dx = $gameMap.displayX();
+		const dy = $gameMap.displayY();
+		if (PIXEL_CollisionManager.collisionStepCount === undefined) PIXEL_CollisionManager.initConfig();
+		const step = PIXEL_CollisionManager.collisionStepCount;
+		const subW = Math.max(2, Math.ceil(tw / step) - 1);
+		const subH = Math.max(2, Math.ceil(th / step) - 1);
+		dbg.samples.forEach((s) => {
+			const px = Math.floor((s.x - dx) * tw);
+			const py = Math.floor((s.y - dy) * th);
+			this.bitmap.fillRect(px, py, subW, subH, s.color);
+		});
+	}
+	/**
+	* Draws a 1px rectangle stroke.
+	* @param {number} x The x in pixels.
+	* @param {number} y The y in pixels.
+	* @param {number} w The width in pixels.
+	* @param {number} h The height in pixels.
+	* @param {string} color The CSS color.
+	*/
+	_strokeRect(x, y, w, h, color) {
+		this.bitmap.fillRect(x, y, w, 1, color);
+		this.bitmap.fillRect(x, y + h - 1, w, 1, color);
+		this.bitmap.fillRect(x, y, 1, h, color);
+		this.bitmap.fillRect(x + w - 1, y, 1, h, color);
+	}
+};
+
+//#endregion
+//#region src/plugins/pixel/core/sprites/Spriteset_Map.js
+/**
+* Extends {@link Spriteset_Map.createUpperLayer}.<br/>
+* Creates the PIXEL collision overlay sprite and adds it to the spriteset.
+*/
+J.PIXEL.Aliased.Spriteset_Map.set("createUpperLayer", Spriteset_Map.prototype.createUpperLayer);
+Spriteset_Map.prototype.createUpperLayer = function() {
+	J.PIXEL.Aliased.Spriteset_Map.get("createUpperLayer").call(this);
+	this.createPixelCollisionOverlay();
+};
+/**
+* Creates the PIXEL collision overlay sprite and adds it as a child.
+*/
+Spriteset_Map.prototype.createPixelCollisionOverlay = function() {
+	this.setupPixelOverlayKeymap();
+	const initialVisibility = J.PIXEL && J.PIXEL.Metadata ? J.PIXEL.Metadata.OverlayInitiallyVisible : false;
+	this.setPixelOverlayVisible(this.pixelOverlayVisible() || initialVisibility);
+	PixelDebugSampler.enabled = this.pixelOverlayVisible();
+	const overlay = new Sprite_PixelCollisionOverlay();
+	overlay.visible = this.pixelOverlayVisible();
+	this.setPixelCollisionOverlay(overlay);
+	this.addChild(overlay);
+};
+/**
+* Gets the sprite drawing the pixel collision overlay.
+* @returns {Sprite_PixelCollisionOverlay|null}
+*/
+Spriteset_Map.prototype.pixelCollisionOverlay = function() {
+	return this._pixelCollisionOverlay;
+};
+/**
+* Sets the sprite drawing the pixel collision overlay.
+* @param {Sprite_PixelCollisionOverlay} overlay The sprite to track.
+*/
+Spriteset_Map.prototype.setPixelCollisionOverlay = function(overlay) {
+	this._pixelCollisionOverlay = overlay;
+};
+/**
+* Ensures a key is mapped for toggling the overlay.
+* Uses the backslash key (keyCode 220) by default.
+*/
+Spriteset_Map.prototype.setupPixelOverlayKeymap = function() {
+	if (!Input.keyMapper[220]) {
+		Input.keyMapper[220] = "pixelOverlay";
+	}
+};
+/**
+* Extends {@link Spriteset_Map.update}.<br/>
+* Handles toggle input and forwards updates to the overlay.
+*/
+J.PIXEL.Aliased.Spriteset_Map.set("update", Spriteset_Map.prototype.update);
+Spriteset_Map.prototype.update = function() {
+	J.PIXEL.Aliased.Spriteset_Map.get("update").call(this);
+	if (Input.isTriggered("pixelOverlay")) {
+		this.setPixelOverlayVisible(!this.pixelOverlayVisible());
+		if (this.pixelCollisionOverlay()) {
+			this.pixelCollisionOverlay().visible = this.pixelOverlayVisible();
+		}
+		PixelDebugSampler.enabled = this.pixelOverlayVisible();
+	}
+};
+/**
+* Gets the pixel overlay visible.
+* @returns {boolean} The pixelOverlayVisible.
+*/
+Spriteset_Map.prototype.pixelOverlayVisible = function() {
+	return this._pixelOverlayVisible;
+};
+/**
+* Sets the pixel overlay visible.
+* @param {boolean} newPixelOverlayVisible The new pixelOverlayVisible.
+*/
+Spriteset_Map.prototype.setPixelOverlayVisible = function(newPixelOverlayVisible) {
+	this._pixelOverlayVisible = newPixelOverlayVisible;
+};
+
+//#endregion
+//#region src/plugins/pixel/core/registerPixelSaveRoutes.js
+/**
+* Lifts this plugin's slice out of whatever host carries it and into its own section file.
+*
+* Without this the namespace still saves correctly - it simply rides inline on the host it was
+* assigned to, which is where every plugin's state lived before the router existed. Registering
+* is what gives J-Pixelistics a file of its own to read.
+*
+* The namespace check is the one this codebase allows: J-Base-Save is genuinely optional, and
+* without it the engine's own save path carries this state inline just as it always did.
+*/
+if (J.BASE.EXT.SAVE) {
+	SaveSectionRouter.registerNamespace("_pixel", "pixel");
+}
+
+//#endregion
+//# sourceMappingURL=J-Pixelistics.js.map
