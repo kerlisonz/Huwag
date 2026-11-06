@@ -1,0 +1,33 @@
+# ============================================================
+# Huwag — normalização de texto e marcação de binários
+# ============================================================
+# O RPG Maker MZ grava os dados em UTF-8 sem BOM e com LF.
+# Fixar eol=lf evita diffs falsos entre Windows, Linux e macOS.
+
+* text=auto eol=lf
+
+*.md          text eol=lf
+*.js          text eol=lf
+*.json        text eol=lf
+*.css         text eol=lf
+*.html        text eol=lf
+*.txt         text eol=lf
+*.rmmzproject text eol=lf
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ogg     binary
+*.m4a     binary
+*.wav     binary
+*.mp3     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.otf     binary
+*.wasm    binary
+*.efk     binary
+*.efkefc  binary
+*.pdf     binary
+*.rmmzsave binary

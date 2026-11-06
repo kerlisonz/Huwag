@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Arquivos de dados do RPG Maker MZ: não acrescentar newline final
+[game/data/*.json]
+insert_final_newline = false
+
+[*.{png,jpg,jpeg,gif,ogg,m4a,wav,mp3,woff,woff2,ttf,otf,wasm,efk,efkefc,pdf,rmmzsave}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

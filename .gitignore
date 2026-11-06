@@ -1,33 +1,27 @@
-# ============================================
-# .gitignore para RPG Maker MZ
-# Projeto: Huwag
-# ============================================
+# ============================================================
+# Huwag — o que NÃO deve ser versionado
+# ============================================================
 
-# === Saves de Jogo (RPG Maker MZ) ===
-# Saves locais nunca devem ser versionados para não sobrepor o progresso de outros
+# --- Saves e dados de execução (RPG Maker MZ) ---
 save/
 Save/
 game/save/
 game/Save/
-*.rmmzsave
-Save*.rmmzsave
-config.rmmzsave
-global.rmmzsave
 www/save/
 game/www/save/
+*.rmmzsave
 *.rpgsave
 
-# === Builds e Exportações (Deployment do RMMZ) ===
-# Builds compiladas geradas via "Arquivo -> Deployment"
+# --- Builds e exports (Arquivo > Deployment) ---
 output/
-game/output/
 deployment/
-game/deployment/
 build/
-game/build/
 dist/
-game/dist/
 www/
+game/output/
+game/deployment/
+game/build/
+game/dist/
 game/www/
 Game.exe
 *.zip
@@ -35,34 +29,33 @@ Game.exe
 *.7z
 *.tar.gz
 
-# === Ferramentas e IA Locais ===
+# --- Área de trabalho local (não versionada) ---
+.tmp/
 .agents/
 scratch/
 
-# === Backups e Temporários do RPG Maker ===
+# --- Backups e temporários ---
 Backup/
 backup/
 *.backup
+*.bak
 *.tmp
 *.log
 *.cache
 *~
 
-# === Node & Dependências (se usar ferramentas externas) ===
+# --- Node.js (ferramentas auxiliares) ---
 node_modules/
 package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# === Arquivos de Sistema Operacional ===
-# Windows
+# --- Sistema operacional ---
 Thumbs.db
 ehthumbs.db
 desktop.ini
 $RECYCLE.BIN/
-
-# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -70,15 +63,11 @@ Icon
 ._*
 .Spotlight-V100
 .Trashes
-
-# Linux
-*~
 .directory
 
-# === IDEs e Editores ===
+# --- Editores ---
 .vscode/*
 !.vscode/extensions.json
 .idea/
 *.sublime-project
 *.sublime-workspace
-
