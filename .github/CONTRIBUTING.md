@@ -78,6 +78,15 @@ chore(repo): adiciona gitattributes e editorconfig
   se mudar um nome no banco, mude lá também.
 - PDFs e material de origem ficam em `docs/referencias/`.
 
+## Agentes de IA
+
+- Regras sempre-ativas para qualquer agente: [`AGENTS.md`](../AGENTS.md) na raiz.
+- Skills de projeto ficam em `.agents/skills/<nome>/SKILL.md`, com `name` e `description` no
+  frontmatter YAML. O harness descobre essa pasta automaticamente.
+- O **Ponytail** é vendorizado (MIT). Para atualizar, siga
+  [`.agents/skills/ponytail/NOTICE.md`](../.agents/skills/ponytail/NOTICE.md) e registre o novo
+  commit no aviso.
+
 ## Assets
 
 - Até a fase de visual definitivo, use os placeholders da biblioteca do MZ.

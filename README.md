@@ -57,6 +57,8 @@ do Ato 3. É uma experiência curta, de aproximadamente 30 minutos.
 
 ```text
 Huwag/
+├── .agents/                   # skills de agentes (Ponytail, MIT)
+│   └── skills/ponytail/
 ├── .github/                   # contribuição, pull request e issues
 │   ├── CONTRIBUTING.md
 │   ├── PULL_REQUEST_TEMPLATE.md
@@ -124,6 +126,8 @@ Resumo; o detalhamento está em [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 - **Assets** entram como placeholder até a fase de visual definitivo; ao trocar, manter a posição
   do tile no tileset para não quebrar os mapas.
 - **Documentação** separada por assunto em `docs/`; mantenha o índice atualizado.
+- **Agentes de IA:** regras sempre-ativas em [AGENTS.md](AGENTS.md); skills de projeto em
+  `.agents/skills/`.
 
 ## Equipe
 

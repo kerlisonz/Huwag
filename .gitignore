@@ -31,7 +31,9 @@ Game.exe
 
 # --- Área de trabalho local (não versionada) ---
 .tmp/
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 scratch/
 
 # --- Backups e temporários ---

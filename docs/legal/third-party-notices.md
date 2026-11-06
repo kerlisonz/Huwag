@@ -35,6 +35,16 @@ de cada grupo. **A licença do projeto ([LICENSE](../../LICENSE)) não se estend
 | `AltMenuScreen.js`, `AltSaveScreen.js`, `TextPicture.js`, `ButtonPicture.js` | RPG Maker MZ (padrão) | EULA do RPG Maker MZ |
 | `rmmz_movement.js` | Plugins padrão/comunidade | Verificar antes de reativar (está desligado) |
 
+## Skills de agentes
+
+| Skill | Autor | Licença | Caminho |
+|---|---|---|---|
+| Ponytail | Dietrich Gebert ([DietrichGebert](https://github.com/DietrichGebert)) | MIT | `.agents/skills/ponytail/` |
+
+O texto da licença e o commit fixado estão em
+[`.agents/skills/ponytail/NOTICE.md`](../../.agents/skills/ponytail/NOTICE.md). As regras
+sempre-ativas ficam em [`AGENTS.md`](../../AGENTS.md).
+
 ## Bibliotecas
 
 | Biblioteca | Uso | Licença de origem |
