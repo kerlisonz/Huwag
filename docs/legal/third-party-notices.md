@@ -40,10 +40,13 @@ de cada grupo. **A licença do projeto ([LICENSE](../../LICENSE)) não se estend
 | Skill | Autor | Licença | Caminho |
 |---|---|---|---|
 | Ponytail | Dietrich Gebert ([DietrichGebert](https://github.com/DietrichGebert)) | MIT | `.agents/skills/ponytail/` |
+| Agency Agents (5 agentes de game development) | [msitarzewski](https://github.com/msitarzewski/agency-agents) e contribuidores | MIT | `.qoder/skills/` |
 
-O texto da licença e o commit fixado estão em
-[`.agents/skills/ponytail/NOTICE.md`](../../.agents/skills/ponytail/NOTICE.md). As regras
-sempre-ativas ficam em [`AGENTS.md`](../../AGENTS.md).
+Textos e versões fixadas:
+
+- [`AGENTS.md`](../../AGENTS.md) — regras sempre-ativas (Ponytail).
+- [`.agents/skills/ponytail/NOTICE.md`](../../.agents/skills/ponytail/NOTICE.md) — commit e licença do Ponytail.
+- [`.qoder/skills/README.md`](../../.qoder/skills/README.md) — commit e arquivos importados da Agency.
 
 ## Bibliotecas
 

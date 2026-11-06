@@ -81,11 +81,14 @@ chore(repo): adiciona gitattributes e editorconfig
 ## Agentes de IA
 
 - Regras sempre-ativas para qualquer agente: [`AGENTS.md`](../AGENTS.md) na raiz.
-- Skills de projeto ficam em `.agents/skills/<nome>/SKILL.md`, com `name` e `description` no
-  frontmatter YAML. O harness descobre essa pasta automaticamente.
+- Skills de projeto do harness ficam em `.agents/skills/<nome>/SKILL.md`, com `name` e
+  `description` no frontmatter YAML.
+- No **Qoder**, skills ficam em `.qoder/skills/<nome>/SKILL.md` (o Qoder não lê `.agents/skills`).
 - O **Ponytail** é vendorizado (MIT). Para atualizar, siga
   [`.agents/skills/ponytail/NOTICE.md`](../.agents/skills/ponytail/NOTICE.md) e registre o novo
   commit no aviso.
+- Os agentes de game development da **Agency** estão em `.qoder/skills/`; a proveniência e o
+  commit estão em [`.qoder/skills/README.md`](../.qoder/skills/README.md).
 
 ## Assets
 

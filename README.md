@@ -63,6 +63,8 @@ Huwag/
 │   ├── CONTRIBUTING.md
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   └── ISSUE_TEMPLATE/
+├── .qoder/                    # skills do Qoder (Agency Agents, MIT)
+│   └── skills/
 ├── docs/                      # documentação (índice em docs/README.md)
 │   ├── design/                # GDD
 │   ├── producao/              # guia, switches e roadmap
