@@ -208,6 +208,9 @@ Para pôr um ataque corpo-a-corpo funcional:
 
 ## 11. Scripts de validação (em `.tmp/`)
 
+> `.tmp/` é a área de trabalho local do desenvolvedor e **não é versionada**. Os scripts abaixo
+> existem na máquina que montou o J-ABS; para torná-los permanentes, promova-os para o repositório.
+
 - `author-demo.js` — autoriza a demo (skill/arma/ator/mapas), idempotente, com backups.
 - `author-player-attack.js` — adiciona o `learning` do skill 235 à classe.
 - `verify-demo.js` — confirma conteúdo dos mapas/dados.
