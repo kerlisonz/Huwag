@@ -1,0 +1,36 @@
+# Licença de uso — Projeto Huwag
+
+Copyright © 2026 Huwag — Kerlison Kennedy da Silva Oliveira, Maria Eduarda Cavalcante Melo e
+Wilton Carlos Justino da Costa Filho.
+
+Este repositório contém um projeto **acadêmico e não comercial**. A licença abaixo cobre apenas
+o material de autoria da equipe: código próprio, mapas, eventos, textos, documentação e o PDF de
+switches.
+
+## 1. Uso permitido
+
+- Estudar, executar e modificar o projeto para fins pessoais, acadêmicos ou de avaliação.
+- Citar o projeto e seus autores em trabalhos acadêmicos, com link para este repositório.
+
+## 2. Uso não permitido
+
+- Uso comercial, venda, aluguel ou distribuição paga do jogo ou de partes dele.
+- Redistribuição de builds (Windows/Linux) sem autorização expressa da equipe.
+- Remoção dos créditos de autoria.
+
+## 3. Assets de terceiros
+
+Este documento **não** licencia:
+
+- os assets da biblioteca padrão do RPG Maker MZ (RTP), de titularidade da Gotcha Gotcha Games;
+- os plugins `J-*`, de autoria de Jeremy Espinoza (JE);
+- bibliotecas e fontes de terceiros embarcadas pelo RPG Maker MZ.
+
+Consulte [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) e os termos originais de cada item.
+
+## 4. Isenção de garantia
+
+O material é fornecido "como está", sem garantias de qualquer tipo. Os autores não se
+responsabilizam por danos decorrentes do uso.
+
+Para autorizações fora destes termos, entre em contato com a equipe.
