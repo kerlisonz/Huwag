@@ -7,12 +7,12 @@ fica fora dela de propósito: o MZ só precisa desta pasta para rodar.
 ## Pontos de atenção
 
 - `data/` — banco de dados e mapas em JSON (UTF-8 sem BOM). Não edite com o editor aberto.
-- `js/plugins/` — 20 plugins; a ordem de carregamento está em `js/plugins.js`. Leia
-  [`../docs/03-relatorio-jabs.md`](../docs/03-relatorio-jabs.md) antes de mexer nos `J-*`.
+- `js/plugins/` — 18 plugins; a ordem de carregamento está em `js/plugins.js`. Leia
+  [`../docs/tecnico/relatorio-jabs.md`](../docs/tecnico/relatorio-jabs.md) antes de mexer nos `J-*`.
 - `js/libs/` — bibliotecas da engine (PixiJS, Effekseer, pako, localForage).
 - `save/` — saves locais; **não versionado**.
 - `img/`, `audio/`, `effects/`, `fonts/` — biblioteca padrão do MZ (placeholders). Ver
-  [`../THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
+  [`../docs/legal/third-party-notices.md`](../docs/legal/third-party-notices.md).
 - Resolução: `data/System.json → advanced` (1920×1080), não `package.json`.
 
 ## Mapas
@@ -25,4 +25,4 @@ fica fora dela de propósito: o MZ só precisa desta pasta para rodar.
 | 004 | JABS_ActionMap | técnico: visuais de skill do J-ABS |
 | 005 | JABS_EnemyMap | técnico: mapa de inimigos do J-ABS |
 
-Regras de edição e convenções: [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+Regras de edição e convenções: [`../.github/CONTRIBUTING.md`](../.github/CONTRIBUTING.md).

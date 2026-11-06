@@ -1,8 +1,8 @@
 # Switches e variáveis
 
-Fonte primária: [`referencias/switches-huwag.pdf`](referencias/switches-huwag.pdf) — tabela
+Fonte primária: [`../referencias/switches-huwag.pdf`](../referencias/switches-huwag.pdf) — tabela
 `001`–`019` do documento original. Os switches `016`–`019` estavam em branco e receberam as
-propostas do [guia de desenvolvimento](02-guia-de-desenvolvimento.md#7-os-switches-um-a-um-como-montar-cada-um).
+propostas do [guia de desenvolvimento](guia-de-desenvolvimento.md#7-os-switches-um-a-um-como-montar-cada-um).
 
 Este documento é a **versão de trabalho**: nome usado no banco, condição, efeito e status da
 implementação.

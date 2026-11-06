@@ -1,6 +1,6 @@
 # Huwag — Guia de Desenvolvimento no RPG Maker MZ
 
-Atos 1 e 2 · baseado no [GDD](01-gdd.md) v0.0.2, na [tabela de switches](04-switches.md) e no áudio de 05/11/2026
+Atos 1 e 2 · baseado no [GDD](../design/gdd.md) v0.0.2, na [tabela de switches](switches.md) e no áudio de 05/11/2026
 
 ## 1. Objetivo e escopo atual
 
@@ -121,7 +121,7 @@ Conceitos que serão usados o tempo todo:
 
 ## 7. Os switches, um a um (como montar cada um)
 
-A tabela abaixo parte do seu [documento de switches](04-switches.md). A coluna da direita é a sugestão de **como montar no editor**.
+A tabela abaixo parte do seu [documento de switches](switches.md). A coluna da direita é a sugestão de **como montar no editor**.
 
 ### Ato 1
 
@@ -150,7 +150,7 @@ A tabela abaixo parte do seu [documento de switches](04-switches.md). A coluna d
 
 ### Switches 016 a 019 (em branco no documento)
 
-O documento deixa quatro switches vazios. Sugestões para preencher, **a confirmar por você** — já nomeados no banco como proposta (ver [04-switches.md](04-switches.md)):
+O documento deixa quatro switches vazios. Sugestões para preencher, **a confirmar por você** — já nomeados no banco como proposta (ver [switches.md](switches.md)):
 
 | Switch | Sugestão |
 | --- | --- |

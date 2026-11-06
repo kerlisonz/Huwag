@@ -1,6 +1,6 @@
 # Roadmap de produção — Huwag
 
-Plano de execução derivado do [GDD](01-gdd.md), do [guia de desenvolvimento](02-guia-de-desenvolvimento.md)
+Plano de execução derivado do [GDD](../design/gdd.md), do [guia de desenvolvimento](guia-de-desenvolvimento.md)
 e das decisões de escopo: **Atos 1 e 2 agora; Ato 3 fora do escopo**.
 
 ## Fase 0 — Fundação (concluída)
@@ -78,7 +78,7 @@ e das decisões de escopo: **Atos 1 e 2 agora; Ato 3 fora do escopo**.
 - [ ] Save/load no meio de cada ato mantém o estado
 - [ ] Correção de bugs e ajustes de ritmo
 - [ ] Build Windows e Linux (Deployment)
-- [ ] Créditos finais e `THIRD-PARTY-NOTICES` revisado
+- [ ] Créditos finais e `docs/legal/third-party-notices.md` revisado
 
 ## Backlog por área
 

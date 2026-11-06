@@ -57,24 +57,26 @@ do Ato 3. É uma experiência curta, de aproximadamente 30 minutos.
 
 ```text
 Huwag/
+├── .github/                   # contribuição, pull request e issues
+│   ├── CONTRIBUTING.md
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── ISSUE_TEMPLATE/
+├── docs/                      # documentação (índice em docs/README.md)
+│   ├── design/                # GDD
+│   ├── producao/              # guia, switches e roadmap
+│   ├── tecnico/               # relatórios de engenharia
+│   ├── referencias/           # PDFs e material de origem
+│   └── legal/                 # créditos e licenças de terceiros
 ├── game/                      # projeto RPG Maker MZ (é este que se abre no editor)
-│   ├── data/                  # banco de dados e mapas (JSON)
-│   ├── js/                    # engine + plugins
-│   ├── img/                   # tilesets, charsets, faces, system
-│   ├── audio/                 # BGM, BGS, ME, SE
-│   ├── effects/               # efeitos Effekseer
-│   ├── fonts/  css/  icon/  movies/
+│   ├── data/ js/ img/ audio/ effects/ fonts/ css/ icon/ movies/
 │   ├── save/                  # saves locais (ignorado pelo Git)
 │   └── game.rmmzproject       # marcador de projeto do MZ
-├── docs/                      # documentação (ver docs/README.md)
-│   └── referencias/           # PDFs e material de origem
-├── .tmp/                      # área de trabalho local (ignorada pelo Git)
+├── tools/                     # scripts de apoio (Node.js)
 ├── .editorconfig
 ├── .gitattributes
 ├── .gitignore
-├── CONTRIBUTING.md
+├── Huwag.code-workspace
 ├── LICENSE
-├── THIRD-PARTY-NOTICES.md
 └── README.md
 ```
 
@@ -96,10 +98,9 @@ Huwag/
 **Teste rápido no navegador (opcional, local):**
 
 ```bash
-node .tmp/serve.js   # serve a pasta game/ em http://localhost:8080
+node tools/serve.js          # serve a pasta game/ em http://localhost:8080
+node tools/validate.js       # confere JSONs, plugins, mapas e links
 ```
-
-O script fica em `.tmp/`, que é local e não versionado.
 
 ## Documentação
 
@@ -107,22 +108,22 @@ O índice completo está em [docs/README.md](docs/README.md). Atalhos:
 
 | Documento | Para quê |
 |---|---|
-| [01 — GDD](docs/01-gdd.md) | visão, narrativa, atos e cronograma |
-| [02 — Guia de desenvolvimento](docs/02-guia-de-desenvolvimento.md) | como montar o jogo no editor, switch a switch |
-| [03 — Relatório J-ABS](docs/03-relatorio-jabs.md) | como o combate no mapa funciona por dentro |
-| [04 — Switches e variáveis](docs/04-switches.md) | nomes, condições e efeitos de cada switch |
-| [05 — Roadmap de produção](docs/05-roadmap-de-producao.md) | fases, backlog e definição de pronto |
+| [GDD](docs/design/gdd.md) | visão, narrativa, atos e cronograma |
+| [Guia de desenvolvimento](docs/producao/guia-de-desenvolvimento.md) | como montar o jogo no editor, switch a switch |
+| [Relatório J-ABS](docs/tecnico/relatorio-jabs.md) | como o combate no mapa funciona por dentro |
+| [Switches e variáveis](docs/producao/switches.md) | nomes, condições e efeitos de cada switch |
+| [Roadmap de produção](docs/producao/roadmap.md) | fases, backlog e definição de pronto |
 
 ## Convenções
 
-Resumo; o detalhamento está em [CONTRIBUTING.md](CONTRIBUTING.md).
+Resumo; o detalhamento está em [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 - **Commits** em [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`.
 - **Branches** curtas: `feat/ato-1-eventos`, `fix/hud-hp`, `docs/switches`.
 - **Dados do MZ** em UTF-8 sem BOM; nunca commitar `game/save/`.
 - **Assets** entram como placeholder até a fase de visual definitivo; ao trocar, manter a posição
   do tile no tileset para não quebrar os mapas.
-- **Documentação** numerada em `docs/`; um assunto por arquivo.
+- **Documentação** separada por assunto em `docs/`; mantenha o índice atualizado.
 
 ## Equipe
 
@@ -137,4 +138,4 @@ deste repositório são de autoria da equipe — ver [LICENSE](LICENSE).
 
 Assets e bibliotecas de terceiros (RTP do RPG Maker MZ, plugins J-*, PixiJS, Effekseer, fontes
 M+, entre outros) **não** são cobertos por essa licença e seguem os termos de seus autores —
-ver [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+ver [docs/legal/third-party-notices.md](docs/legal/third-party-notices.md).

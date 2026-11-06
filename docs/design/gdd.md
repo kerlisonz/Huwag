@@ -3,8 +3,8 @@
 **Versão 0.0.2** — RPG 2D Top-Down | Prazo de Desenvolvimento: 6 Semanas
 
 > **Escopo atual:** Atos 1 e 2. O passo a passo de implementação está no
-> [guia de desenvolvimento](02-guia-de-desenvolvimento.md) e a tabela de switches em
-> [04-switches.md](04-switches.md).
+> [guia de desenvolvimento](../producao/guia-de-desenvolvimento.md) e a tabela de switches em
+> [switches.md](../producao/switches.md).
 
 ## 1. Visão Geral (Overview)
 

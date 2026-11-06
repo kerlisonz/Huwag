@@ -1,22 +1,33 @@
 # Documentação — Huwag
 
-Índice e convenções da documentação do projeto. Leia na ordem indicada.
+Índice da documentação do projeto. A ordem sugerida de leitura é a da primeira tabela.
 
-## Ordem de leitura
+## Mapa da documentação
 
 | # | Documento | Conteúdo | Quando usar |
 |---|---|---|---|
-| 01 | [GDD](01-gdd.md) | visão, tema, atos, assets necessários, cronograma | entender o jogo |
-| 02 | [Guia de desenvolvimento](02-guia-de-desenvolvimento.md) | database, mapas, eventos, switch a switch, checklist | produzir |
-| 03 | [Relatório J-ABS](03-relatorio-jabs.md) | combate no mapa por dentro, dependências e armadilhas | mexer em plugins |
-| 04 | [Switches e variáveis](04-switches.md) | nomes no banco + condição → efeito + status | implementar eventos |
-| 05 | [Roadmap de produção](05-roadmap-de-producao.md) | fases, backlog, definição de pronto | planejar |
+| 01 | [GDD](design/gdd.md) | visão, tema, atos, assets necessários, cronograma | entender o jogo |
+| 02 | [Guia de desenvolvimento](producao/guia-de-desenvolvimento.md) | database, mapas, eventos, switch a switch, checklist | produzir |
+| 03 | [Relatório J-ABS](tecnico/relatorio-jabs.md) | combate no mapa por dentro, dependências e armadilhas | mexer em plugins |
+| 04 | [Switches e variáveis](producao/switches.md) | nomes no banco + condição → efeito + status | implementar eventos |
+| 05 | [Roadmap de produção](producao/roadmap.md) | fases, backlog, definição de pronto | planejar |
 
 Fonte primária da tabela de switches: [`referencias/switches-huwag.pdf`](referencias/switches-huwag.pdf).
 
+## Organização das pastas
+
+| Pasta | O que guarda |
+|---|---|
+| `design/` | documento de design — o "porquê" do jogo |
+| `producao/` | guia de implementação, switches e roadmap |
+| `tecnico/` | relatórios de engenharia e integração de plugins |
+| `referencias/` | PDFs e material de origem |
+| `legal/` | licenças, créditos e avisos de terceiros |
+
 ## Convenções
 
-- Nomes numerados (`01-`, `02-`, ...) definem a ordem de leitura; um assunto por arquivo.
+- Um assunto por arquivo; o nome do arquivo descreve o assunto (sem numeração — a ordem está na
+  tabela acima).
 - Idioma: português (Brasil). Termos da engine (switch, variable, event page, tileset) ficam em
   inglês, como aparecem no editor.
 - Links **relativos**; nunca caminhos absolutos da máquina.
@@ -28,5 +39,5 @@ Fonte primária da tabela de switches: [`referencias/switches-huwag.pdf`](refere
 
 `.tmp/` guarda os clones de referência ([je-can-code/ca](https://github.com/je-can-code/ca) e
 [je-can-code/rmmz-plugins](https://github.com/je-can-code/rmmz-plugins)), backups de dados e
-scripts de validação. Ela **não é versionada** e não é fonte de verdade: se um script de `.tmp/`
-for útil de forma permanente, ele deve ser promovido para o repositório.
+scripts de validação. Ela **não é versionada** e não é fonte de verdade: os scripts úteis foram
+promovidos para [`tools/`](../tools/README.md).

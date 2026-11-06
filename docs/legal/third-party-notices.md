@@ -1,7 +1,7 @@
 # Créditos e avisos de terceiros
 
 O Projeto Huwag usa assets, plugins e bibliotecas de terceiros. Este documento registra a origem
-de cada grupo. **A licença do projeto ([LICENSE](LICENSE)) não se estende a eles.**
+de cada grupo. **A licença do projeto ([LICENSE](../../LICENSE)) não se estende a eles.**
 
 ## RPG Maker MZ — biblioteca padrão (RTP)
 
@@ -50,8 +50,9 @@ As licenças completas acompanham as distribuições originais do RPG Maker MZ e
 
 ## Documentação
 
-- `docs/01-gdd.md`, `docs/02-guia-de-desenvolvimento.md`, `docs/03-relatorio-jabs.md`,
-  `docs/04-switches.md` e `docs/05-roadmap-de-producao.md`: autoria da equipe.
+- `docs/design/gdd.md`, `docs/producao/guia-de-desenvolvimento.md`,
+  `docs/tecnico/relatorio-jabs.md`, `docs/producao/switches.md` e
+  `docs/producao/roadmap.md`: autoria da equipe.
 - `docs/referencias/switches-huwag.pdf`: documento de trabalho da equipe.
 
 ## Como reportar um crédito faltante

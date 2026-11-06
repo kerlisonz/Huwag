@@ -71,10 +71,11 @@ chore(repo): adiciona gitattributes e editorconfig
 
 ## Documentação
 
-- Tudo em `docs/`, com nomes numerados (`01-`, `02-`, ...) e um assunto por arquivo.
-- Ao criar ou renomear um documento, atualize [docs/README.md](docs/README.md).
-- A fonte da verdade dos switches é [docs/04-switches.md](docs/04-switches.md): se mudar um nome
-  no banco, mude lá também.
+- Tudo em `docs/`, organizado por assunto (`design/`, `producao/`, `tecnico/`, `referencias/`,
+  `legal/`) e um assunto por arquivo.
+- Ao criar ou renomear um documento, atualize [docs/README.md](../docs/README.md).
+- A fonte da verdade dos switches é [docs/producao/switches.md](../docs/producao/switches.md):
+  se mudar um nome no banco, mude lá também.
 - PDFs e material de origem ficam em `docs/referencias/`.
 
 ## Assets
@@ -88,8 +89,8 @@ chore(repo): adiciona gitattributes e editorconfig
 ## Checklist antes do commit
 
 - [ ] O jogo abre e roda com **F5** sem erro no console.
-- [ ] Os JSON alterados são válidos (`node -e "JSON.parse(...)"` ou o validador da equipe).
+- [ ] Os JSON alterados são válidos (`node tools/validate.js`).
 - [ ] Nenhum `game/save/`, `*.bak`, build ou arquivo de `.tmp/` entrou no commit.
 - [ ] `git status` só mostra o que deveria.
-- [ ] Documentação atualizada (README, índice de docs ou `04-switches.md`).
+- [ ] Documentação atualizada (README, índice de docs ou `docs/producao/switches.md`).
 - [ ] Mensagem de commit descreve a mudança.
